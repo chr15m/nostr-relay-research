@@ -82,5 +82,15 @@ END {
         printf "%7d %-20s %s\n", counts[name], name, urls[name]
     }
 }' | sort -nr
+
+echo
+
+echo "Summary of declared NIP support:"
+jq -r '.[] | .supported_nips[]?' "$input_file" | \
+sort -n | uniq -c | sort -nr | \
+while read -r count nip; do
+    printf "%7d NIP-%02d\n" "$count" "$nip"
+done
+
 exit 0
 

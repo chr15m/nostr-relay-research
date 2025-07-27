@@ -5,6 +5,7 @@ const fs = require('fs');
 const K = 8; // K-bucket size
 const ALPHA = 3; // Concurrency parameter for lookups
 const ID_LENGTH_BITS = 256;
+const MAX_DISTANCE = 2n ** BigInt(ID_LENGTH_BITS);
 
 // --- Pure Helper Functions ---
 const sha256 = data => crypto.createHash('sha256').update(data).digest('hex');
@@ -48,11 +49,16 @@ const findKClosest = (dht, nodeUrls, targetId) =>
         .slice(0, K);
 
 // --- Simulation Core ---
-const runLookup = (dht, queryingUrl, targetId, bootstrapUrls) => {
+const runLookup = (dht, queryingUrl, targetId, bootstrapUrls, verbose = false) => {
     let currentDht = dht;
     const queryingId = currentDht[queryingUrl].id;
 
-    let shortlist = findKClosest(currentDht, bootstrapUrls, targetId).map(url => ({ url, queried: false }));
+    // A real node uses its own routing table to find initial nodes for a lookup.
+    // It only uses bootstrap nodes if its own table is empty.
+    const ownTableNodes = currentDht[queryingUrl].table.flat();
+    const initialPeers = ownTableNodes.length > 0 ? ownTableNodes : bootstrapUrls;
+
+    let shortlist = findKClosest(currentDht, initialPeers, targetId).map(url => ({ url, queried: false }));
     const queriedUrls = new Set();
 
     while (true) {
@@ -60,6 +66,12 @@ const runLookup = (dht, queryingUrl, targetId, bootstrapUrls) => {
         if (nodesToQuery.length === 0) break;
 
         for (const { url: nodeToQueryUrl } of nodesToQuery) {
+            if (verbose) {
+                const dist = xorDistance(dht[nodeToQueryUrl].id, targetId);
+                const percentage = (dist * 10000n) / MAX_DISTANCE;
+                const displayPercent = (Number(percentage) / 100).toFixed(2);
+                console.log(`    Querying ${nodeToQueryUrl.padEnd(40)} (distance: ${displayPercent.padStart(6, ' ')}%)`);
+            }
             // Mark as queried for this lookup
             const shortlistEntry = shortlist.find(n => n.url === nodeToQueryUrl);
             if (shortlistEntry) shortlistEntry.queried = true;
@@ -104,6 +116,66 @@ const runLookup = (dht, queryingUrl, targetId, bootstrapUrls) => {
     return { dht: currentDht, result: shortlist.map(n => n.url) };
 };
 
+const printRoutingTables = (dht, urlsToPrint) => {
+    console.log("\n--- Routing Tables ---");
+    urlsToPrint.forEach(url => {
+        const node = dht[url];
+        if (!node) {
+            console.log(`\nNode not found: ${url}`);
+            return;
+        }
+        console.log(`\nNode: ${node.url} (ID: ${node.id.slice(0, 10)}...)`);
+        let hasEntries = false;
+        node.table.forEach((bucket, i) => {
+            if (bucket.length > 0) {
+                hasEntries = true;
+                console.log(`  Bucket ${i} (nodes with common prefix length ${i}):`);
+                bucket.forEach(peerUrl => {
+                    const peerId = dht[peerUrl] ? dht[peerUrl].id : 'unknown';
+                    console.log(`    - ${peerUrl.padEnd(40)} (ID: ${peerId.slice(0, 10)}...)`);
+                });
+            }
+        });
+        if (!hasEntries) {
+            console.log("  (empty)");
+        }
+    });
+};
+
+const generateDotFile = (dht) => {
+    let dot = 'digraph DHT {\n';
+    dot += '  layout=sfdp;\n';
+    dot += '  node [shape=point];\n';
+    dot += '  edge [arrowsize=0.4];\n\n';
+
+    const nodes = Object.keys(dht);
+    nodes.forEach(url => {
+        dot += `  "${url}";\n`;
+    });
+    dot += '\n';
+
+    nodes.forEach(url => {
+        const node = dht[url];
+        if (!node) return;
+
+        // Find the highest-indexed (closest) non-empty bucket
+        for (let i = node.table.length - 1; i >= 0; i--) {
+            if (node.table[i].length > 0) {
+                node.table[i].forEach(peerUrl => {
+                    // Ensure the peer exists in the DHT before drawing an edge
+                    if (dht[peerUrl]) {
+                        dot += `  "${url}" -> "${peerUrl}";\n`;
+                    }
+                });
+                break; // Only draw connections for the single closest bucket
+            }
+        }
+    });
+
+    dot += '}\n';
+    return dot;
+};
+
 // --- Main Execution ---
 const main = () => {
     const urls = fs.readFileSync('relay-list.txt', 'utf-8').split('\n').filter(Boolean)
@@ -124,18 +196,67 @@ const main = () => {
     });
     process.stdout.write('\n'); // Newline after progress bar
 
-    // 3. Run a final test lookup from a random node for a random ID
-    console.log("\n--- Running final test lookup ---");
-    const searcherUrl = urls[Math.floor(urls.length / 2)];
-    const targetId = sha256(Math.random().toString());
-    console.log(`Node ${searcherUrl} is searching for random target ${targetId.slice(0, 10)}...`);
+    // 3. Stabilize the network by having each node perform random lookups
+    console.log("\n--- Stabilizing network ---");
+    const STABILIZATION_ROUNDS = 2;
+    for (let i = 0; i < STABILIZATION_ROUNDS; i++) {
+        process.stdout.write(`\rStabilization round ${i + 1}/${STABILIZATION_ROUNDS}`);
+        // In a real network, this would be a continuous, slow process.
+        // Here, we do it in a few distinct rounds for simulation purposes.
+        for (const url of urls) {
+            // Each node refreshes its view of the network by looking for a random ID.
+            // This helps populate buckets and discover more of the network.
+            const randomId = sha256(Math.random().toString());
+            const { dht: newDht } = runLookup(dht, url, randomId, [bootstrapUrl]);
+            dht = newDht;
+        }
+    }
+    process.stdout.write('\n');
 
-    const { result } = runLookup(dht, searcherUrl, targetId, [bootstrapUrl]);
-    console.log(`\nLookup complete. Found ${result.length} closest nodes:`);
-    result.forEach(url => {
-        const dist = xorDistance(dht[url].id, targetId);
-        console.log(`  - ${url.padEnd(40)} (distance: ${dist})`);
-    });
+    // 4. Print some routing tables for inspection
+    const nodesToInspect = [
+        urls[0], // Bootstrap node
+        urls[Math.floor(urls.length / 2)], // A middle node
+        urls[urls.length - 1] // The last node to join
+    ];
+    printRoutingTables(dht, nodesToInspect);
+
+    // 5. Run a few test lookups for specific, known nodes
+    console.log("\n--- Running test lookups for known nodes ---");
+    const lookupCount = 3;
+    for (let i = 0; i < lookupCount; i++) {
+        const searcherUrl = urls[Math.floor(Math.random() * urls.length)];
+        let targetUrl = urls[Math.floor(Math.random() * urls.length)];
+        // Ensure searcher and target are not the same
+        while (targetUrl === searcherUrl) {
+            targetUrl = urls[Math.floor(Math.random() * urls.length)];
+        }
+
+        const targetId = dht[targetUrl].id;
+        console.log(`\n[Test ${i + 1}/${lookupCount}] Searching for ${targetUrl} from ${searcherUrl}`);
+
+        const { result } = runLookup(dht, searcherUrl, targetId, [bootstrapUrl], true);
+
+        const found = result.includes(targetUrl);
+        console.log(`Lookup complete. Target found: ${found}`);
+        if (found) {
+            console.log(`  - ${targetUrl} was in the list of ${result.length} closest nodes.`);
+        } else {
+            console.log(`  - ${targetUrl} was NOT in the list of ${result.length} closest nodes.`);
+            console.log("    Closest nodes found:");
+            result.forEach(url => {
+                const dist = xorDistance(dht[url].id, targetId);
+                console.log(`      - ${url.padEnd(40)} (distance: ${dist})`);
+            });
+        }
+    }
+
+    // 6. Generate visualization
+    console.log("\n--- Generating visualization ---");
+    const dotContent = generateDotFile(dht);
+    fs.writeFileSync('dht.dot', dotContent);
+    console.log("Generated dht.dot. To render, you need graphviz installed.");
+    console.log("Run: dot -Tpng dht.dot -o dht.png && xdg-open dht.png");
 };
 
 main();

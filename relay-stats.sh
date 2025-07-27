@@ -61,6 +61,12 @@ done | sort | uniq -c | sort -nr
 echo
 
 echo "Summary of relay software:"
-jq -r '.[] | .software | select(. != null)' "$input_file" | sort | uniq -c | sort -nr
+jq -r '.[] | .software | select(. != null)' "$input_file" | \
+while IFS= read -r software; do
+    software=${software%/}
+    software=${software%.git}
+    software=${software##*/}
+    echo "$software"
+done | sort | uniq -c | sort -nr
 exit 0
 

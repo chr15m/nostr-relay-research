@@ -5,11 +5,23 @@
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
+# Parse command-line arguments
+only_errors=false
+if [ "$1" == "--only-errors" ]; then
+  only_errors=true
+fi
+
 # The file to store the final JSON output
 output_file="relay-info.json"
 
 # Initialize the output file with an empty JSON object
-echo "{}" > "$output_file"
+if [ "$only_errors" = true ]; then
+  if [ ! -f "$output_file" ]; then
+    echo "{}" > "$output_file"
+  fi
+else
+  echo "{}" > "$output_file"
+fi
 
 # Check if nak and jq are installed
 if ! command -v nak &> /dev/null; then
@@ -27,6 +39,13 @@ while IFS= read -r relay_host || [[ -n "$relay_host" ]]; do
   # Skip empty lines
   if [ -z "$relay_host" ]; then
     continue
+  fi
+
+  if [ "$only_errors" = true ]; then
+    # Check if the relay has an error in the output file
+    if ! jq -e --arg key "$relay_host" '.[$key] and (.[$key] | has("error"))' "$output_file" > /dev/null; then
+      continue
+    fi
   fi
 
   echo "Probing wss://$relay_host..."

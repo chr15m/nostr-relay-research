@@ -62,11 +62,25 @@ echo
 
 echo "Summary of relay software:"
 jq -r '.[] | .software | select(. != null)' "$input_file" | \
-while IFS= read -r software; do
-    software=${software%/}
-    software=${software%.git}
-    software=${software##*/}
-    echo "$software"
-done | sort | uniq -c | sort -nr
+while IFS= read -r original_url; do
+    short_name=${original_url%/}
+    short_name=${short_name%.git}
+    short_name=${short_name##*/}
+    # Use a tab as a separator for awk
+    printf "%s\t%s\n" "$short_name" "$original_url"
+done | \
+awk -F'\t' '
+{
+    # $1 is short_name, $2 is original_url
+    counts[$1]++
+    if (!($1 in urls)) {
+        urls[$1] = $2
+    }
+}
+END {
+    for (name in counts) {
+        printf "%7d %-20s %s\n", counts[name], name, urls[name]
+    }
+}' | sort -nr
 exit 0
 

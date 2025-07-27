@@ -106,7 +106,8 @@ const runLookup = (dht, queryingUrl, targetId, bootstrapUrls) => {
 
 // --- Main Execution ---
 const main = () => {
-    const urls = fs.readFileSync('relay-list.txt', 'utf-8').split('\n').filter(Boolean);
+    const urls = fs.readFileSync('relay-list.txt', 'utf-8').split('\n').filter(Boolean)
+        .sort(() => Math.random() - 0.5);
     if (!urls.length) return console.log("No relays found in relay-list.txt.");
 
     // 1. Initialize the state of all nodes

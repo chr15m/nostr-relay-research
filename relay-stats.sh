@@ -45,11 +45,15 @@ jq -r '.[] | .error | select(. != null)' "$input_file" | \
 while IFS= read -r error; do
     case "$error" in
         *"context deadline exceeded"*) echo "Timeout" ;;
+        *"bigger context"*) echo "Weird 'context' message" ;;
         *"no route to host"*) echo "No route to host" ;;
         *"network is unreachable"*) echo "Network unreachable" ;;
+        *"connection refused"*) echo "Connection refused" ;;
         *"server misbehaving"*) echo "Server misbehaving" ;;
         *"invalid json"*) echo "Invalid NIP-11 JSON" ;;
         *"tls: failed to verify certificate"*) echo "TLS/SSL Error" ;;
+        *"<html"*|*"<head>"*|*"<title>"*|*"502 Bad Gateway"*) echo "HTML/HTTP Error" ;;
+        *'"'*) echo "Malformed NIP-11 JSON" ;;
         *) echo "Other" ;;
     esac
 done | sort | uniq -c | sort -nr

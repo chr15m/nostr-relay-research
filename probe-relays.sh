@@ -45,15 +45,22 @@ while IFS= read -r relay_host || [[ -n "$relay_host" ]]; do
     # If successful and is JSON, create a JSON entry with the relay's data.
     json_entry=$(jq -n --arg key "$relay_host" --argjson value "$nak_output" '{($key): $value}')
   else
-    # If it failed or is not JSON, record an error object.
-    # The error message is stored as a string value.
-    error_payload=$(jq -n --arg msg "$nak_output" '{"error": $msg}')
-    json_entry=$(jq -n --arg key "$relay_host" --argjson value "$error_payload" '{($key): $value}')
+    # If it failed or is not JSON, check if we have a valid entry already.
+    if jq -e --arg key "$relay_host" '.[$key] and (.[$key] | has("error") | not)' "$output_file" > /dev/null; then
+      echo "  -> Failed to probe wss://$relay_host, but keeping existing valid data."
+    else
+      # If it failed or is not JSON, record an error object.
+      # The error message is stored as a string value.
+      error_payload=$(jq -n --arg msg "$nak_output" '{"error": $msg}')
+      json_entry=$(jq -n --arg key "$relay_host" --argjson value "$error_payload" '{($key): $value}')
+    fi
   fi
 
-  # Merge the new entry into the output file atomically.
-  # Using jq's slurp (-s) and multiply (*) features to merge objects.
-  jq -s '.[0] * .[1]' "$output_file" <(echo "$json_entry") > "$output_file.tmp" && mv "$output_file.tmp" "$output_file"
+  # Merge the new entry into the output file atomically if an entry was created.
+  if [ -n "$json_entry" ]; then
+    # Using jq's slurp (-s) and multiply (*) features to merge objects.
+    jq -s '.[0] * .[1]' "$output_file" <(echo "$json_entry") > "$output_file.tmp" && mv "$output_file.tmp" "$output_file"
+  fi
 
 done < "relay-list.txt"
 

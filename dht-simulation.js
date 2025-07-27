@@ -142,6 +142,29 @@ const printRoutingTables = (dht, urlsToPrint) => {
     });
 };
 
+const analyzeNetworkHealth = (dht) => {
+    console.log("\n--- Network Health Analysis ---");
+    const nodeUrls = Object.keys(dht);
+    const totalNodes = nodeUrls.length;
+    let totalEntries = 0;
+    let emptyNodes = 0;
+
+    nodeUrls.forEach(url => {
+        const node = dht[url];
+        const tableSize = node.table.flat().length;
+        if (tableSize === 0) {
+            emptyNodes++;
+        }
+        totalEntries += tableSize;
+    });
+
+    const averageEntries = totalEntries / totalNodes;
+
+    console.log(`Total nodes in DHT:       ${totalNodes}`);
+    console.log(`Average routing table size: ${averageEntries.toFixed(2)}`);
+    console.log(`Nodes with empty tables:    ${emptyNodes}`);
+};
+
 const generateDotFile = (dht) => {
     let dot = 'digraph DHT {\n';
     dot += '  layout=sfdp;\n';
@@ -213,7 +236,10 @@ const main = () => {
     }
     process.stdout.write('\n');
 
-    // 4. Print some routing tables for inspection
+    // 4. Analyze network health
+    analyzeNetworkHealth(dht);
+
+    // 5. Print some routing tables for inspection
     const nodesToInspect = [
         urls[0], // Bootstrap node
         urls[Math.floor(urls.length / 2)], // A middle node
@@ -221,7 +247,7 @@ const main = () => {
     ];
     printRoutingTables(dht, nodesToInspect);
 
-    // 5. Run a few test lookups for specific, known nodes
+    // 6. Run a few test lookups for specific, known nodes
     console.log("\n--- Running test lookups for known nodes ---");
     const lookupCount = 3;
     for (let i = 0; i < lookupCount; i++) {
@@ -251,7 +277,7 @@ const main = () => {
         }
     }
 
-    // 6. Generate visualization
+    // 7. Generate visualization
     console.log("\n--- Generating visualization ---");
     const dotContent = generateDotFile(dht);
     fs.writeFileSync('dht.dot', dotContent);

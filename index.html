@@ -12,6 +12,7 @@
         .node-label { font-family: monospace; font-size: 10px; fill: #888; text-anchor: middle; user-select: none; }
         .highlight { fill: none; stroke: red; stroke-width: 2px; transition: opacity 0.5s; }
         .path-line { stroke: blue; stroke-width: 1.5px; opacity: 0.7; marker-end: url(#arrowhead); }
+        .path-line.best-path { stroke: red; marker-end: url(#arrowhead-red); }
     </style>
 </head>
 <body>
@@ -20,6 +21,9 @@
         <defs>
             <marker id="arrowhead" markerWidth="5" markerHeight="3.5" refX="5" refY="1.75" orient="auto">
                 <polygon points="0 0, 5 1.75, 0 3.5" fill="blue" />
+            </marker>
+            <marker id="arrowhead-red" markerWidth="5" markerHeight="3.5" refX="5" refY="1.75" orient="auto">
+                <polygon points="0 0, 5 1.75, 0 3.5" fill="red" />
             </marker>
         </defs>
     </svg>
@@ -37,14 +41,121 @@
             const ID_LENGTH_BITS = 256;
             const MAX_DISTANCE = 2n ** BigInt(ID_LENGTH_BITS);
             const relayUrls = [
-                "wss://relay.damus.io", "wss://relay.snort.social", "wss://nos.lol",
-                "wss://nostr.wine", "wss://relay.primal.net", "wss://purplepag.es",
-                "wss://relay.nostr.band", "wss://nostr.fmt.wiz.biz", "wss://relay.nostr.info",
-                "wss://nostr-pub.wellorder.net", "wss://relay.current.fyi", "wss://nostr.oxtr.dev",
-                "wss://relay.bitcoiner.social", "wss://relay.nostrati.com", "wss://eden.nostr.land",
-                "wss://nostr.milou.lol", "wss://brb.io", "wss://nostr.rocks",
-                "wss://nostr.zebedee.cloud", "wss://global.relay.red", "wss://relay.minds.com",
-                "wss://nostr.pleb.network", "wss://relay.nostrich.land", "wss://relay.wellfound.com"
+                "wss://a.nos.lol", "wss://adeptus.cwharton.com", "wss://ae.purplerelay.com", "wss://aegis.relayted.de",
+                "wss://airchat.nostr1.com", "wss://antisocial.nostr1.com", "wss://aplaceinthesun.nostr1.com",
+                "wss://articles.layer3.news", "wss://asia.azzamo.net", "wss://at.nostrworks.com", "wss://auth.nostr1.com",
+                "wss://backup.keychat.io", "wss://basedpotato.nostr1.com", "wss://bevo.nostr1.com", "wss://bitcoiner.social",
+                "wss://bitcoinmaximalists.online", "wss://bnc.netsec.vip", "wss://bostr.bitcointxoko.com",
+                "wss://bostr.lightningspore.com", "wss://brainstorm.nostr1.com", "wss://btc.klendazu.com",
+                "wss://bucket.coracle.social", "wss://budabit.nostr1.com", "wss://carlos-cdb.top", "wss://ch.purplerelay.com",
+                "wss://chadf.nostr1.com", "wss://chorus.bonsai.com", "wss://chorus.tealeaf.dev", "wss://christpill.nostr1.com",
+                "wss://chronicle.ziomc.com", "wss://custom.fiatjaf.com", "wss://cyberspace.nostr1.com", "wss://czas.top",
+                "wss://david.nostr1.com", "wss://de.purplerelay.com", "wss://dev-relay.lnfi.network",
+                "wss://dikaios1517.nostr1.com", "wss://dwebcamp.nos.social", "wss://eu.purplerelay.com",
+                "wss://fabian.nostr1.com", "wss://feeds.nostr.band", "wss://fiatjaf.com", "wss://fiatjaf.nostr1.com",
+                "wss://fido-news.z7.ai", "wss://fl.purplerelay.com", "wss://free.relayted.de", "wss://freelay.sovbit.host",
+                "wss://frens.nostr1.com", "wss://frjosh.nostr1.com", "wss://gitcitadel.nostr1.com", "wss://greensoul.space",
+                "wss://groups.0xchat.com", "wss://groups.fiatjaf.com", "wss://groups.yugoatobe.com",
+                "wss://h.codingarena.top", "wss://haven.calva.dev", "wss://haven.ciori.net", "wss://haven.eternal.gdn",
+                "wss://haven.on4r.net", "wss://haven.relayted.de", "wss://haven.tealeaf.dev", "wss://hax.reliefcloud.com",
+                "wss://hbr.coracle.social", "wss://hist.nostr.land", "wss://hivetalk.nostr1.com",
+                "wss://hotrightnow.nostr1.com", "wss://in.purplerelay.com", "wss://inbox.azzamo.net",
+                "wss://inner.sebastix.social", "wss://ir.purplerelay.com", "wss://ithurtswhenip.ee", "wss://jellyfish.land",
+                "wss://jingle.carlos-cdb.top", "wss://jingle.nostrver.se", "wss://kirpy.nostrnaut.love",
+                "wss://knostr.neutrine.com", "wss://koru.bitcointxoko.com", "wss://lightningrelay.com",
+                "wss://lunchbox.sandwich.farm", "wss://mandidraws.nostrnaut.love", "wss://me.purplerelay.com",
+                "wss://mleku.nostr1.com", "wss://monitorlizard.nostr1.com", "wss://multiplexer.huszonegy.world",
+                "wss://n.ok0.org", "wss://nip85.nostr.band", "wss://no.str.cr", "wss://nortis.nostr1.com", "wss://nos.lol",
+                "wss://nos.xmark.cc", "wss://nosfabrica.nostr1.com", "wss://nostr-01.yakihonne.com",
+                "wss://nostr-02.dorafactory.org", "wss://nostr-02.yakihonne.com", "wss://nostr-03.dorafactory.org",
+                "wss://nostr-1.nbo.angani.co", "wss://nostr-dev.wellorder.net", "wss://nostr-dev.zbd.gg",
+                "wss://nostr-pr01.redscrypt.org:47443", "wss://nostr-pr02.redscrypt.org", "wss://nostr-pr03.redscrypt.org",
+                "wss://nostr-pub.wellorder.net", "wss://nostr-relay.amethyst.name", "wss://nostr-relay.psfoundation.info",
+                "wss://nostr-relay.schnitzel.world", "wss://nostr-relay01.redscrypt.org:48443",
+                "wss://nostr-rs-relay.dev.fedibtc.com", "wss://nostr-verified.wellorder.net", "wss://nostr.0x7e.xyz",
+                "wss://nostr.1sat.org", "wss://nostr.256k1.dev", "wss://nostr.2b9t.xyz", "wss://nostr.2h2o.io",
+                "wss://nostr.agentcampfire.com", "wss://nostr.app.runonflux.io", "wss://nostr.asdf.mx", "wss://nostr.at",
+                "wss://nostr.azzamo.net", "wss://nostr.bilthon.dev", "wss://nostr.bitcoiner.social",
+                "wss://nostr.bitcoinist.org", "wss://nostr.bitcoinvn.io", "wss://nostr.camalolo.com",
+                "wss://nostr.caramboo.com", "wss://nostr.chaima.info", "wss://nostr.cizmar.net",
+                "wss://nostr.cloud.vinney.xyz", "wss://nostr.coincards.com", "wss://nostr.cypherpunk.today",
+                "wss://nostr.czas.plus", "wss://nostr.d11n.net", "wss://nostr.decentony.com", "wss://nostr.demery.net",
+                "wss://nostr.dl3.dedyn.io", "wss://nostr.dlsouza.lol", "wss://nostr.dodge.me.uk", "wss://nostr.easydns.ca",
+                "wss://nostr.einundzwanzig.space", "wss://nostr.extrabits.io", "wss://nostr.felixzieger.de",
+                "wss://nostr.fort-btc.club", "wss://nostr.frostr.xyz", "wss://nostr.gleeze.com", "wss://nostr.hashbang.nl",
+                "wss://nostr.hekster.org", "wss://nostr.hifish.org", "wss://nostr.holbrook.no", "wss://nostr.jcloud.es",
+                "wss://nostr.jfischer.org", "wss://nostr.jonmartins.com", "wss://nostr.kloudcover.com",
+                "wss://nostr.koning-degraaf.nl", "wss://nostr.kungfu-g.rip", "wss://nostr.liberty.fans",
+                "wss://nostr.lopp.social", "wss://nostr.lorentz.is", "wss://nostr.massmux.com", "wss://nostr.mom",
+                "wss://nostr.myshosholoza.co.za", "wss://nostr.nodeofsven.com", "wss://nostr.noderunners.network",
+                "wss://nostr.noones.com", "wss://nostr.nordlysln.net:3241", "wss://nostr.notribe.net",
+                "wss://nostr.on4r.net", "wss://nostr.oxtr.dev", "wss://nostr.pailakapo.com", "wss://nostr.pareto.space",
+                "wss://nostr.polyserv.xyz", "wss://nostr.psychoet.nexus", "wss://nostr.rblb.it:7777",
+                "wss://nostr.reelnetwork.eu", "wss://nostr.rikmeijer.nl", "wss://nostr.roundrockbitcoiners.com",
+                "wss://nostr.rtvslawenia.com", "wss://nostr.sagaciousd.com", "wss://nostr.sathoarder.com",
+                "wss://nostr.satstralia.com", "wss://nostr.sebastix.dev", "wss://nostr.sectiontwo.org",
+                "wss://nostr.self-determined.de", "wss://nostr.snowbla.de", "wss://nostr.sovbit.host",
+                "wss://nostr.sprovoost.nl", "wss://nostr.stakey.net", "wss://nostr.strits.dk",
+                "wss://nostr.sudocarlos.com", "wss://nostr.tac.lol", "wss://nostr.tavux.tech", "wss://nostr.thurk.org",
+                "wss://nostr.tools.global.id", "wss://nostr.vulpem.com", "wss://nostr.xmr.rocks", "wss://nostr.yael.at",
+                "wss://nostr.zbd.gg", "wss://nostr01.counterclockwise.io", "wss://nostr21.com",
+                "wss://nostream-production-643a.up.railway.app", "wss://nostrelay.circum.space",
+                "wss://nostrelay.taylorperron.com", "wss://nostrua.com", "wss://nostrue.com", "wss://nr.rosano.ca",
+                "wss://nr.yay.so", "wss://nsrelay.assilvestrar.club", "wss://offchain.pub", "wss://orangepiller.org",
+                "wss://paid.no.str.cr", "wss://paid.nostrified.org", "wss://pareto.nostr1.com", "wss://pl.unostr.one",
+                "wss://pnostr.self-determined.de", "wss://podsystems.nostr1.com", "wss://powrelay.xyz",
+                "wss://primus.nostr1.com", "wss://prl.plus", "wss://problematic.network", "wss://profiles.nostr1.com",
+                "wss://promenade.fiatjaf.com", "wss://purplerelay.com", "wss://pyramid.fiatjaf.com",
+                "wss://relay-nwc.rizful.com", "wss://relay-rpi.edufeed.org", "wss://relay-testnet.k8s.layer3.news",
+                "wss://relay.0xchat.com", "wss://relay.757btc.org", "wss://relay.agorist.space", "wss://relay.angor.io",
+                "wss://relay.artx.market", "wss://relay.arx-ccn.com", "wss://relay.asthroughfire.com",
+                "wss://relay.azzamo.net", "wss://relay.basspistol.org", "wss://relay.benthecarman.com",
+                "wss://relay.beta.fogtype.com", "wss://relay.bitcoinpark.com", "wss://relay.bitcoinschool.nl",
+                "wss://relay.bitcoinveneto.org", "wss://relay.bitdevs.tw", "wss://relay.brightbolt.net",
+                "wss://relay.buildtall.com", "wss://relay.camelus.app", "wss://relay.caramboo.com",
+                "wss://relay.cashumints.space", "wss://relay.copylaradio.com", "wss://relay.corpum.com",
+                "wss://relay.cosmicbolt.net", "wss://relay.credenso.cafe", "wss://relay.d11n.net",
+                "wss://relay.danieldaquino.me", "wss://relay.das.casa", "wss://relay.davidebtc.me",
+                "wss://relay.degmods.com", "wss://relay.denver.space", "wss://relay.devvul.com",
+                "wss://relay.diablocanyon1.com", "wss://relay.digitalezukunft.cyou", "wss://relay.drss.io",
+                "wss://relay.electriclifestyle.com", "wss://relay.evanverma.com", "wss://relay.fr13nd5.com",
+                "wss://relay.g1sms.fr", "wss://relay.gathr.gives", "wss://relay.groups.nip29.com",
+                "wss://relay.guggero.org", "wss://relay.hasenpfeffr.com", "wss://relay.hodl.ar", "wss://relay.hunos.hu",
+                "wss://relay.illuminodes.com", "wss://relay.keychat.io", "wss://relay.kookykeys.com",
+                "wss://relay.kreweofkeys.net", "wss://relay.lifpay.me", "wss://relay.lightning.gdn",
+                "wss://relay.lnfi.network", "wss://relay.lumina.rocks", "wss://relay.magiccity.live",
+                "wss://relay.mess.ch", "wss://relay.mostard.org", "wss://relay.mostro.network",
+                "wss://relay.nbswozlfpjuwc4y.boo", "wss://relay.needs.tr", "wss://relay.netstr.io",
+                "wss://relay.noderunners.network", "wss://relay.nos.social", "wss://relay.nosotros.app",
+                "wss://relay.nosto.re", "wss://relay.nostpy.lol", "wss://relay.nostr.band", "wss://relay.nostr.lighting",
+                "wss://relay.nostr.net", "wss://relay.nostr.nu", "wss://relay.nostr.sc", "wss://relay.nostr.watch",
+                "wss://relay.nostr.wf", "wss://relay.nostrarabia.com", "wss://relay.nostrdice.com",
+                "wss://relay.nostrdvm.com", "wss://relay.nostrfreedom.net", "wss://relay.nostrhub.fr",
+                "wss://relay.nostrified.org", "wss://relay.nostriot.com", "wss://relay.nostromo.social",
+                "wss://relay.nostrplebs.com", "wss://relay.nostrr.de", "wss://relay.nostrtalk.org",
+                "wss://relay.nostrverified.fyi", "wss://relay.nostrview.com", "wss://relay.noswhere.com",
+                "wss://relay.notoshi.win", "wss://relay.nsec.app", "wss://relay.nuts.cash", "wss://relay.openbalance.app",
+                "wss://relay.pituf.in", "wss://relay.pleb.to", "wss://relay.purplestr.com", "wss://relay.reya.su",
+                "wss://relay.rkus.se", "wss://relay.s3x.social", "wss://relay.satlantis.io",
+                "wss://relay.satoshidnc.com", "wss://relay.satsdays.com", "wss://relay.shawnyeager.com",
+                "wss://relay.shop21.dk", "wss://relay.sigit.io", "wss://relay.stream.labs.h3.se",
+                "wss://relay.tagayasu.xyz", "wss://relay.tapestry.ninja", "wss://relay.test.nquiz.io",
+                "wss://relay.unsupervised.online", "wss://relay.usefusion.ai", "wss://relay.vanderwarker.family",
+                "wss://relay.varke.eu", "wss://relay.vertexlab.io", "wss://relay.wavlake.com",
+                "wss://relay.wellorder.net", "wss://relay.weloveit.info", "wss://relay.westernbtc.com",
+                "wss://relay.wikifreedia.xyz", "wss://relay.yana.do", "wss://relay.ziomc.com", "wss://relay.zone667.com",
+                "wss://relay01.lnfi.network", "wss://relay02.lnfi.network", "wss://relay03.lnfi.network",
+                "wss://relay04.lnfi.network", "wss://relay1.nostrchat.io", "wss://relay1.plor.dev",
+                "wss://relay2.angor.io", "wss://relay2.nostrchat.io", "wss://relaypag.es", "wss://rocky.nostr1.com",
+                "wss://santo.iguanatech.net", "wss://satsage.xyz", "wss://seth.nostr1.com",
+                "wss://skeme.vanderwarker.family", "wss://slick.mjex.me", "wss://social.olsentribe.fyi",
+                "wss://strfry.bonsai.com", "wss://strfry.openhoofd.nl", "wss://strfry.shock.network",
+                "wss://tamby.mjex.me", "wss://team-relay.pareto.space", "wss://tollbooth.stens.dev",
+                "wss://uk.purplerelay.com", "wss://unostr.one", "wss://us.azzamo.net", "wss://user.kindpag.es",
+                "wss://vidono.apps.slidestr.net", "wss://vitor.nostr1.com", "wss://wbc.nostr1.com", "wss://wons.calva.dev",
+                "wss://wot.codingarena.top", "wss://wot.danieldaquino.me", "wss://wot.nostr.sats4.life",
+                "wss://wot.relay.vanderwarker.family", "wss://wot.relayted.de", "wss://wot.sebastix.social",
+                "wss://xmr.usenostr.org"
             ];
 
             // --- State ---
@@ -52,6 +163,7 @@
             const nodePositions = {};
             let sourceNodeUrl = null;
             let highlightCircle = null;
+            let bootstrapUrl = null;
 
             // --- Pure Helper Functions (Browser Adapted) ---
             const sha256 = async (str) => {
@@ -99,25 +211,83 @@
                     })
                     .slice(0, K);
 
+            const logNetworkStats = (dht) => {
+                console.log(`%c--- Network Stats ---`, 'font-weight: bold; font-size: 1.2em;');
+                const nodeUrls = Object.keys(dht);
+                const totalNodes = nodeUrls.length;
+                let totalEntries = 0;
+                let emptyNodes = 0;
+                const tableSizes = [];
+                const bucketCounts = [];
+
+                nodeUrls.forEach(url => {
+                    const node = dht[url];
+                    const tableSize = node.table.flat().length;
+                    const nonEmptyBuckets = node.table.filter(b => b.length > 0).length;
+
+                    if (tableSize === 0) {
+                        emptyNodes++;
+                    }
+                    totalEntries += tableSize;
+                    tableSizes.push(tableSize);
+                    bucketCounts.push(nonEmptyBuckets);
+                });
+
+                const averageEntries = totalEntries / totalNodes;
+                const averageBuckets = bucketCounts.reduce((a, b) => a + b, 0) / totalNodes;
+
+                console.log(`Total nodes in DHT: ${totalNodes}`);
+                console.log(`Average routing table size: ${averageEntries.toFixed(2)}`);
+                console.log(`Average non-empty buckets per node: ${averageBuckets.toFixed(2)}`);
+                console.log(`Nodes with empty tables: ${emptyNodes}`);
+
+                console.log(`%c--- Individual Node Tables ---`, 'font-weight: bold; font-size: 1.1em;');
+                nodeUrls.sort().forEach(url => {
+                    const node = dht[url];
+                    const tableSize = node.table.flat().length;
+                    const nonEmptyBuckets = node.table.filter(b => b.length > 0).length;
+                    console.log(`${url.padEnd(40)} | Entries: ${String(tableSize).padStart(3)} | Buckets: ${String(nonEmptyBuckets).padStart(3)}`);
+                });
+            };
+
             // --- Simulation Core ---
-            const runLookup = async (dht, queryingUrl, targetId, bootstrapUrls) => {
+            const runLookup = async (dht, queryingUrl, targetNodeUrl, targetId, bootstrapUrls, verbose = false) => {
                 let currentDht = dht;
                 const queryingId = currentDht[queryingUrl].id;
                 const path = [];
                 const ownTableNodes = currentDht[queryingUrl].table.flat();
                 const initialPeers = [...new Set([...ownTableNodes, ...bootstrapUrls])];
-                let shortlist = findKClosest(currentDht, initialPeers, targetId).map(url => ({ url, queried: false }));
-                const queriedUrls = new Set();
+                let shortlist = findKClosest(currentDht, initialPeers, targetId).map(url => ({ url, queried: false, recommender: queryingUrl }));
 
+                if (verbose) {
+                    console.log(`%cStarting lookup from ${queryingUrl} for target ${targetId.slice(0, 10)}... (${targetNodeUrl})`, 'font-weight: bold; font-size: 1.2em;');
+                    console.log(`Initial shortlist:`, shortlist.map(n => n.url));
+                }
+
+                let round = 0;
                 while (true) {
-                    const nodesToQuery = shortlist.filter(n => !n.queried).slice(0, ALPHA);
-                    if (nodesToQuery.length === 0) break;
+                    round++;
+                    if (verbose) console.log(`%c--- Round ${round} ---`, 'color: blue; font-weight: bold;');
 
-                    for (const { url: nodeToQueryUrl } of nodesToQuery) {
-                        path.push([queryingUrl, nodeToQueryUrl]);
+                    const nodesToQuery = shortlist.filter(n => !n.queried).slice(0, ALPHA);
+                    if (nodesToQuery.length === 0) {
+                        if (verbose) console.log("No more unqueried nodes in shortlist. Terminating.");
+                        break;
+                    }
+
+                    if (verbose) console.log(`Querying ${nodesToQuery.length} nodes concurrently...`);
+
+                    for (const { url: nodeToQueryUrl, recommender: recommenderUrl } of nodesToQuery) {
+                        path.push([recommenderUrl, nodeToQueryUrl]);
                         const shortlistEntry = shortlist.find(n => n.url === nodeToQueryUrl);
                         if (shortlistEntry) shortlistEntry.queried = true;
-                        queriedUrls.add(nodeToQueryUrl);
+
+                        if (verbose) {
+                            const dist = xorDistance(dht[nodeToQueryUrl].id, targetId);
+                            const percentage = (dist * 10000n) / MAX_DISTANCE;
+                            const displayPercent = (Number(percentage) / 100).toFixed(2);
+                            console.log(`  -> Querying ${nodeToQueryUrl} (recommended by ${recommenderUrl}) (distance: ${displayPercent}%)`);
+                        }
 
                         const oldTable = currentDht[nodeToQueryUrl].table;
                         const newTable = addNodeToTable(oldTable, queryingUrl, queryingId, currentDht[nodeToQueryUrl].id);
@@ -127,19 +297,31 @@
 
                         const knownToNode = currentDht[nodeToQueryUrl].table.flat();
                         const responseNodes = findKClosest(currentDht, knownToNode, targetId);
+
+                        if (verbose) {
+                            console.log(`    <- Response from ${nodeToQueryUrl} with ${responseNodes.length} nodes:`, responseNodes);
+                        }
+
                         responseNodes.forEach(url => {
                             if (!shortlist.some(n => n.url === url)) {
-                                shortlist.push({ url, queried: false });
+                                shortlist.push({ url, queried: false, recommender: nodeToQueryUrl });
                             }
                         });
                     }
 
                     const allShortlistUrls = shortlist.map(n => n.url);
-                    shortlist = findKClosest(currentDht, allShortlistUrls, targetId).map(url =>
-                        shortlist.find(n => n.url === url) || { url, queried: queriedUrls.has(url) }
-                    );
+                    const sortedUrls = findKClosest(currentDht, allShortlistUrls, targetId);
+                    const oldShortlist = shortlist;
+                    shortlist = sortedUrls.map(url => oldShortlist.find(n => n.url === url));
 
-                    if (shortlist.every(n => n.queried)) break;
+                    if (verbose) {
+                        console.log("Updated shortlist (sorted and trimmed):", shortlist.map(n => ({...n})));
+                    }
+
+                    if (shortlist.every(n => n.queried)) {
+                        if (verbose) console.log("All nodes in shortlist have been queried. Terminating.");
+                        break;
+                    }
                 }
 
                 let finalTable = currentDht[queryingUrl].table;
@@ -148,7 +330,30 @@
                 });
                 currentDht = updateNodeTable(currentDht, queryingUrl, finalTable);
 
-                return { dht: currentDht, result: shortlist.map(n => n.url), path };
+                const finalShortlistUrls = shortlist.map(n => n.url);
+                const bestPath = [];
+                if (finalShortlistUrls.includes(targetNodeUrl)) {
+                    let currentUrl = targetNodeUrl;
+                    while (currentUrl && currentUrl !== queryingUrl) {
+                        const entry = shortlist.find(n => n.url === currentUrl);
+                        if (!entry || !entry.recommender) break;
+                        bestPath.unshift([entry.recommender, entry.url]);
+                        currentUrl = entry.recommender;
+                    }
+                }
+
+                if (verbose) {
+                    console.log(`%c--- Lookup Complete ---`, 'font-weight: bold; font-size: 1.2em;');
+                    console.log(`Final K-closest nodes found:`, shortlist.map(n => n.url));
+                    if (bestPath.length > 0) {
+                        const traversed = [bestPath[0][0]];
+                        bestPath.forEach(([, to]) => traversed.push(to));
+                        console.log(`%cBest path to target:`, 'color: green; font-weight: bold;');
+                        console.log(traversed.join(' -> '));
+                    }
+                }
+
+                return { dht: currentDht, result: shortlist.map(n => n.url), path, bestPath };
             };
 
             // --- SVG Drawing and Interaction ---
@@ -178,11 +383,12 @@
                 svg.appendChild(g);
             };
 
-            const drawPath = (path) => {
+            const drawPath = (allPaths, bestPath) => {
                 document.querySelectorAll('.path-line').forEach(el => el.remove());
                 const pathGroup = document.createElementNS(NS, 'g');
+                const bestPathSet = new Set(bestPath.map(([from, to]) => `${from}->${to}`));
 
-                path.forEach(([fromUrl, toUrl]) => {
+                allPaths.forEach(([fromUrl, toUrl]) => {
                     const fromPos = nodePositions[fromUrl];
                     const toPos = nodePositions[toUrl];
                     if (fromPos && toPos) {
@@ -192,6 +398,9 @@
                         line.setAttribute('x2', toPos.x);
                         line.setAttribute('y2', toPos.y);
                         line.classList.add('path-line');
+                        if (bestPathSet.has(`${fromUrl}->${toUrl}`)) {
+                            line.classList.add('best-path');
+                        }
                         pathGroup.appendChild(line);
                     }
                 });
@@ -214,8 +423,8 @@
                     if (sourceNodeUrl === targetNodeUrl) return;
 
                     const targetId = dht[targetNodeUrl].id;
-                    const { path } = await runLookup(dht, sourceNodeUrl, targetId, [relayUrls[0]]);
-                    drawPath(path);
+                    const { path, bestPath } = await runLookup(dht, sourceNodeUrl, targetNodeUrl, targetId, [bootstrapUrl], true);
+                    drawPath(path, bestPath || []);
 
                     sourceNodeUrl = null;
                     if (highlightCircle) {
@@ -234,12 +443,15 @@
                 dht[url] = await createNode(url);
             }
 
-            const [bootstrapUrl, ...otherUrls] = relayUrls;
+            const shuffledRelays = [...relayUrls].sort(() => Math.random() - 0.5);
+            bootstrapUrl = shuffledRelays[0];
+            const otherUrls = shuffledRelays.filter(url => url !== bootstrapUrl);
+
             console.log(`Bootstrap node: ${bootstrapUrl}`);
             for (let i = 0; i < otherUrls.length; i++) {
                 const url = otherUrls[i];
                 loadingDiv.textContent = `Bootstrapping ${i + 1}/${otherUrls.length}`;
-                const { dht: newDht } = await runLookup(dht, url, dht[url].id, [bootstrapUrl]);
+                const { dht: newDht } = await runLookup(dht, url, url, dht[url].id, [bootstrapUrl]);
                 dht = newDht;
             }
 
@@ -249,10 +461,12 @@
                 loadingDiv.textContent = `Stabilizing round ${i + 1}/${STABILIZATION_ROUNDS}`;
                 for (const url of relayUrls) {
                     const randomId = await sha256(Math.random().toString());
-                    const { dht: newDht } = await runLookup(dht, url, randomId, [bootstrapUrl]);
+                    const { dht: newDht } = await runLookup(dht, url, null, randomId, [bootstrapUrl]);
                     dht = newDht;
                 }
             }
+
+            logNetworkStats(dht);
 
             console.log("DHT initialized. Drawing nodes.");
             loadingDiv.style.display = 'none';

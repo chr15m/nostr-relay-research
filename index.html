@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Nostr DHT Lookup Simulator</title>
+    <meta charset="utf-8" />
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: sans-serif; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 2em; color: #555; }
+        svg { width: 100%; height: 100%; background-color: #fdfdfd; }
+        .node-group { cursor: pointer; }
+        .node-circle { fill: #333; }
+        .node-label { font-family: monospace; font-size: 10px; fill: #888; text-anchor: middle; user-select: none; }
+        .highlight { fill: none; stroke: red; stroke-width: 2px; transition: opacity 0.5s; }
+        .path-line { stroke: blue; stroke-width: 1.5px; opacity: 0.7; marker-end: url(#arrowhead); }
+    </style>
+</head>
+<body>
+    <div id="loading">Initializing DHT...</div>
+    <svg id="dht-svg" style="visibility: hidden;">
+        <defs>
+            <marker id="arrowhead" markerWidth="5" markerHeight="3.5" refX="5" refY="1.75" orient="auto">
+                <polygon points="0 0, 5 1.75, 0 3.5" fill="blue" />
+            </marker>
+        </defs>
+    </svg>
+
+    <script>
+        (async () => {
+            // --- DOM Elements ---
+            const svg = document.getElementById('dht-svg');
+            const loadingDiv = document.getElementById('loading');
+            const NS = "http://www.w3.org/2000/svg";
+
+            // --- DHT Constants and Config ---
+            const K = 8;
+            const ALPHA = 3;
+            const ID_LENGTH_BITS = 256;
+            const MAX_DISTANCE = 2n ** BigInt(ID_LENGTH_BITS);
+            const relayUrls = [
+                "wss://relay.damus.io", "wss://relay.snort.social", "wss://nos.lol",
+                "wss://nostr.wine", "wss://relay.primal.net", "wss://purplepag.es",
+                "wss://relay.nostr.band", "wss://nostr.fmt.wiz.biz", "wss://relay.nostr.info",
+                "wss://nostr-pub.wellorder.net", "wss://relay.current.fyi", "wss://nostr.oxtr.dev",
+                "wss://relay.bitcoiner.social", "wss://relay.nostrati.com", "wss://eden.nostr.land",
+                "wss://nostr.milou.lol", "wss://brb.io", "wss://nostr.rocks",
+                "wss://nostr.zebedee.cloud", "wss://global.relay.red", "wss://relay.minds.com",
+                "wss://nostr.pleb.network", "wss://relay.nostrich.land", "wss://relay.wellfound.com"
+            ];
+
+            // --- State ---
+            let dht = {};
+            const nodePositions = {};
+            let sourceNodeUrl = null;
+            let highlightCircle = null;
+
+            // --- Pure Helper Functions (Browser Adapted) ---
+            const sha256 = async (str) => {
+                const buffer = new TextEncoder().encode(str);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            };
+            const getNodeId = sha256;
+            const hexToBigInt = hex => BigInt(`0x${hex}`);
+            const xorDistance = (id1, id2) => hexToBigInt(id1) ^ hexToBigInt(id2);
+            const getBucketIndex = (ownId, otherId) => {
+                const dist = xorDistance(ownId, otherId);
+                if (dist === 0n) return -1;
+                return ID_LENGTH_BITS - dist.toString(2).length;
+            };
+
+            // --- "State Transition" Functions ---
+            const createNode = async (url) => ({
+                url,
+                id: await getNodeId(url),
+                table: Array.from({ length: ID_LENGTH_BITS }, () => [])
+            });
+
+            const addNodeToTable = (table, nodeUrl, nodeId, ownId) => {
+                const bucketIndex = getBucketIndex(ownId, nodeId);
+                if (bucketIndex < 0 || table[bucketIndex].includes(nodeUrl)) return table;
+                if (table[bucketIndex].length >= K) return table;
+                const newTable = table.map(bucket => [...bucket]);
+                newTable[bucketIndex] = [...newTable[bucketIndex], nodeUrl];
+                return newTable;
+            };
+
+            const updateNodeTable = (dht, urlToUpdate, newTable) => ({
+                ...dht,
+                [urlToUpdate]: { ...dht[urlToUpdate], table: newTable }
+            });
+
+            const findKClosest = (dht, nodeUrls, targetId) =>
+                [...new Set(nodeUrls)]
+                    .sort((a, b) => {
+                        const distA = xorDistance(dht[a].id, targetId);
+                        const distB = xorDistance(dht[b].id, targetId);
+                        return distA < distB ? -1 : distA > distB ? 1 : 0;
+                    })
+                    .slice(0, K);
+
+            // --- Simulation Core ---
+            const runLookup = async (dht, queryingUrl, targetId, bootstrapUrls) => {
+                let currentDht = dht;
+                const queryingId = currentDht[queryingUrl].id;
+                const path = [];
+                const ownTableNodes = currentDht[queryingUrl].table.flat();
+                const initialPeers = [...new Set([...ownTableNodes, ...bootstrapUrls])];
+                let shortlist = findKClosest(currentDht, initialPeers, targetId).map(url => ({ url, queried: false }));
+                const queriedUrls = new Set();
+
+                while (true) {
+                    const nodesToQuery = shortlist.filter(n => !n.queried).slice(0, ALPHA);
+                    if (nodesToQuery.length === 0) break;
+
+                    for (const { url: nodeToQueryUrl } of nodesToQuery) {
+                        path.push([queryingUrl, nodeToQueryUrl]);
+                        const shortlistEntry = shortlist.find(n => n.url === nodeToQueryUrl);
+                        if (shortlistEntry) shortlistEntry.queried = true;
+                        queriedUrls.add(nodeToQueryUrl);
+
+                        const oldTable = currentDht[nodeToQueryUrl].table;
+                        const newTable = addNodeToTable(oldTable, queryingUrl, queryingId, currentDht[nodeToQueryUrl].id);
+                        if (oldTable !== newTable) {
+                            currentDht = updateNodeTable(currentDht, nodeToQueryUrl, newTable);
+                        }
+
+                        const knownToNode = currentDht[nodeToQueryUrl].table.flat();
+                        const responseNodes = findKClosest(currentDht, knownToNode, targetId);
+                        responseNodes.forEach(url => {
+                            if (!shortlist.some(n => n.url === url)) {
+                                shortlist.push({ url, queried: false });
+                            }
+                        });
+                    }
+
+                    const allShortlistUrls = shortlist.map(n => n.url);
+                    shortlist = findKClosest(currentDht, allShortlistUrls, targetId).map(url =>
+                        shortlist.find(n => n.url === url) || { url, queried: queriedUrls.has(url) }
+                    );
+
+                    if (shortlist.every(n => n.queried)) break;
+                }
+
+                let finalTable = currentDht[queryingUrl].table;
+                shortlist.forEach(({ url }) => {
+                    finalTable = addNodeToTable(finalTable, url, currentDht[url].id, queryingId);
+                });
+                currentDht = updateNodeTable(currentDht, queryingUrl, finalTable);
+
+                return { dht: currentDht, result: shortlist.map(n => n.url), path };
+            };
+
+            // --- SVG Drawing and Interaction ---
+            const drawNode = (node, x, y) => {
+                const g = document.createElementNS(NS, 'g');
+                g.classList.add('node-group');
+                g.setAttribute('transform', `translate(${x}, ${y})`);
+                g.addEventListener('click', () => handleNodeClick(node.url));
+
+                const circle = document.createElementNS(NS, 'circle');
+                circle.setAttribute('r', 5);
+                circle.classList.add('node-circle');
+
+                const nameText = document.createElementNS(NS, 'text');
+                nameText.classList.add('node-label');
+                nameText.setAttribute('y', 15);
+                nameText.textContent = node.url.replace('wss://', '').replace(/\/$/, '');
+
+                const hashText = document.createElementNS(NS, 'text');
+                hashText.classList.add('node-label');
+                hashText.setAttribute('y', 25);
+                hashText.textContent = node.id.substring(0, 10) + '...';
+
+                g.appendChild(circle);
+                g.appendChild(nameText);
+                g.appendChild(hashText);
+                svg.appendChild(g);
+            };
+
+            const drawPath = (path) => {
+                document.querySelectorAll('.path-line').forEach(el => el.remove());
+                const pathGroup = document.createElementNS(NS, 'g');
+
+                path.forEach(([fromUrl, toUrl]) => {
+                    const fromPos = nodePositions[fromUrl];
+                    const toPos = nodePositions[toUrl];
+                    if (fromPos && toPos) {
+                        const line = document.createElementNS(NS, 'line');
+                        line.setAttribute('x1', fromPos.x);
+                        line.setAttribute('y1', fromPos.y);
+                        line.setAttribute('x2', toPos.x);
+                        line.setAttribute('y2', toPos.y);
+                        line.classList.add('path-line');
+                        pathGroup.appendChild(line);
+                    }
+                });
+                svg.insertBefore(pathGroup, svg.firstChild.nextSibling.nextSibling);
+            };
+
+            const handleNodeClick = async (nodeUrl) => {
+                if (!sourceNodeUrl) {
+                    sourceNodeUrl = nodeUrl;
+                    if (highlightCircle) highlightCircle.remove();
+                    highlightCircle = document.createElementNS(NS, 'circle');
+                    highlightCircle.classList.add('highlight');
+                    highlightCircle.setAttribute('r', 10);
+                    const pos = nodePositions[nodeUrl];
+                    highlightCircle.setAttribute('cx', pos.x);
+                    highlightCircle.setAttribute('cy', pos.y);
+                    svg.appendChild(highlightCircle);
+                } else {
+                    const targetNodeUrl = nodeUrl;
+                    if (sourceNodeUrl === targetNodeUrl) return;
+
+                    const targetId = dht[targetNodeUrl].id;
+                    const { path } = await runLookup(dht, sourceNodeUrl, targetId, [relayUrls[0]]);
+                    drawPath(path);
+
+                    sourceNodeUrl = null;
+                    if (highlightCircle) {
+                        highlightCircle.style.opacity = '0';
+                        setTimeout(() => {
+                            if (highlightCircle) highlightCircle.remove();
+                            highlightCircle = null;
+                        }, 500);
+                    }
+                }
+            };
+
+            // --- Main Execution ---
+            console.log("Initializing DHT...");
+            for (const url of relayUrls) {
+                dht[url] = await createNode(url);
+            }
+
+            const [bootstrapUrl, ...otherUrls] = relayUrls;
+            console.log(`Bootstrap node: ${bootstrapUrl}`);
+            for (let i = 0; i < otherUrls.length; i++) {
+                const url = otherUrls[i];
+                loadingDiv.textContent = `Bootstrapping ${i + 1}/${otherUrls.length}`;
+                const { dht: newDht } = await runLookup(dht, url, dht[url].id, [bootstrapUrl]);
+                dht = newDht;
+            }
+
+            console.log("Stabilizing network...");
+            const STABILIZATION_ROUNDS = 2;
+            for (let i = 0; i < STABILIZATION_ROUNDS; i++) {
+                loadingDiv.textContent = `Stabilizing round ${i + 1}/${STABILIZATION_ROUNDS}`;
+                for (const url of relayUrls) {
+                    const randomId = await sha256(Math.random().toString());
+                    const { dht: newDht } = await runLookup(dht, url, randomId, [bootstrapUrl]);
+                    dht = newDht;
+                }
+            }
+
+            console.log("DHT initialized. Drawing nodes.");
+            loadingDiv.style.display = 'none';
+            svg.style.visibility = 'visible';
+
+            const { width, height } = svg.getBoundingClientRect();
+            Object.values(dht).forEach(node => {
+                const x = 50 + Math.random() * (width - 100);
+                const y = 50 + Math.random() * (height - 100);
+                nodePositions[node.url] = { x, y };
+                drawNode(node, x, y);
+            });
+        })();
+    </script>
+</body>
+</html>

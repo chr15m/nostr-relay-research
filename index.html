@@ -255,9 +255,15 @@
                 let currentDht = dht;
                 const queryingId = currentDht[queryingUrl].id;
                 const path = [];
+                const discoveryPath = []; // Track how target was discovered
                 const ownTableNodes = currentDht[queryingUrl].table.flat();
                 const initialPeers = [...new Set([...ownTableNodes, ...bootstrapUrls])];
-                let shortlist = findKClosest(currentDht, initialPeers, targetId).map(url => ({ url, queried: false, recommender: queryingUrl }));
+                let shortlist = findKClosest(currentDht, initialPeers, targetId).map(url => ({ url, queried: false, recommender: queryingUrl, round: 0 }));
+
+                // Check if target is in initial peers
+                if (targetNodeUrl && shortlist.some(n => n.url === targetNodeUrl)) {
+                    discoveryPath.push([queryingUrl, targetNodeUrl]);
+                }
 
                 if (verbose) {
                     console.log(`%cStarting lookup from ${queryingUrl} for target ${targetId.slice(0, 10)}... (${targetNodeUrl})`, 'font-weight: bold; font-size: 1.2em;');
@@ -304,7 +310,11 @@
 
                         responseNodes.forEach(url => {
                             if (!shortlist.some(n => n.url === url)) {
-                                shortlist.push({ url, queried: false, recommender: nodeToQueryUrl });
+                                shortlist.push({ url, queried: false, recommender: nodeToQueryUrl, round });
+                                // Track if this response contains our target
+                                if (targetNodeUrl && url === targetNodeUrl) {
+                                    discoveryPath.push([nodeToQueryUrl, targetNodeUrl]);
+                                }
                             }
                         });
                     }
@@ -330,15 +340,26 @@
                 });
                 currentDht = updateNodeTable(currentDht, queryingUrl, finalTable);
 
-                const finalShortlistUrls = shortlist.map(n => n.url);
-                const bestPath = [];
-                if (finalShortlistUrls.includes(targetNodeUrl)) {
-                    let currentUrl = targetNodeUrl;
-                    while (currentUrl && currentUrl !== queryingUrl) {
-                        const entry = shortlist.find(n => n.url === currentUrl);
-                        if (!entry || !entry.recommender) break;
-                        bestPath.unshift([entry.recommender, entry.url]);
-                        currentUrl = entry.recommender;
+                // Build the discovery path showing how target was found
+                let bestPath = [];
+                if (targetNodeUrl && discoveryPath.length > 0) {
+                    // Start from the querying node
+                    const pathNodes = [queryingUrl];
+                    
+                    // Add all nodes that discovered the target (there might be multiple)
+                    const discoverers = [...new Set(discoveryPath.map(([from, to]) => from))];
+                    discoverers.forEach(discoverer => {
+                        if (discoverer !== queryingUrl) {
+                            pathNodes.push(discoverer);
+                        }
+                    });
+                    
+                    // End with the target
+                    pathNodes.push(targetNodeUrl);
+                    
+                    // Convert to path segments
+                    for (let i = 0; i < pathNodes.length - 1; i++) {
+                        bestPath.push([pathNodes[i], pathNodes[i + 1]]);
                     }
                 }
 
@@ -348,8 +369,10 @@
                     if (bestPath.length > 0) {
                         const traversed = [bestPath[0][0]];
                         bestPath.forEach(([, to]) => traversed.push(to));
-                        console.log(`%cBest path to target:`, 'color: green; font-weight: bold;');
+                        console.log(`%cDiscovery path to target:`, 'color: green; font-weight: bold;');
                         console.log(traversed.join(' -> '));
+                        console.log(`%cNodes that discovered target:`, 'color: green; font-weight: bold;');
+                        discoveryPath.forEach(([from, to]) => console.log(`  ${from} -> ${to}`));
                     }
                 }
 

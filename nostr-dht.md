@@ -28,8 +28,8 @@ The entire state of a DHT node is its routing table. The table is an array of "b
 
 -   **Buckets**: Each bucket can hold up to **K=8** nodes.
 -   **Node Status**: Nodes are classified to maintain a table of reliable contacts.
-    -   `good`: Responded to a query recently (e.g., within the last 15 minutes).
-    -   `questionable`: No activity for 15 minutes.
+    -   `good`: Responded to a query recently (e.g., within the last 2 hours).
+    -   `questionable`: No activity for 2 hours.
     -   `bad`: Failed to respond to multiple consecutive queries.
 
 ### Routing Table JSON Structure
@@ -92,7 +92,7 @@ When a relay receives a `PING` containing a URL, it can learn about the sender. 
 
 To ensure the routing table contains fresh, responsive nodes, buckets must be periodically refreshed.
 
--   If a bucket has not been updated in 1 hour, it is considered "stale."
+-   If a bucket has not been updated in 4 hours, it is considered "stale."
 -   To refresh a stale bucket, the relay generates a random 256-bit ID that falls within the bucket's range.
 -   It then initiates a `FIND_NODE` lookup for that random ID. This process introduces new nodes into the bucket and validates existing ones, keeping the table up-to-date.
 
@@ -112,6 +112,12 @@ Used to verify that a node is online and responsive. A `PING` can also be used b
     -   `<transaction_id>`: The same ID from the `PING` message.
 
 To prevent abuse, relays should rate-limit `PING` requests on a per-connection basis, for example by ignoring more than one `PING` every 10 seconds from the same WebSocket connection.
+
+### Client Caching
+
+Since the global relay set changes slowly over time, clients MAY cache their DHT routing table state locally. This enables faster lookups without requiring a full bootstrap process on each startup.
+
+Clients SHOULD refresh cached routing tables by performing periodic `FIND_NODE` lookups for random IDs, similar to relay bucket refreshing. Cached routing tables older than 4 hours SHOULD be considered stale and refreshed.
 
 ### `FIND_NODE` / `NODES`
 

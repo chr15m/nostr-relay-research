@@ -5,6 +5,9 @@
     <meta charset="utf-8" />
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: sans-serif; }
+        #instructions { max-width: 400px; position: absolute; top: 20px; left: 20px; z-index: 20; background: #fff; padding: 1em; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        #instructions h2 { margin-top: 0; }
+        #instructions p, #instructions ol { margin-bottom: 0; }
         #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 2em; color: #555; }
         svg { width: 100%; height: 100%; background-color: #fdfdfd; }
         .node-group { cursor: pointer; }
@@ -17,7 +20,22 @@
     </style>
 </head>
 <body>
-    <div id="lookup-container" style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 10; display: none; background: white; padding: 10px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
+    <div id="instructions">
+        <h2>Nostr DHT Simulation</h2>
+        <p>This is a simulation of a Kademlia-based Distributed Hash Table for Nostr relay discovery.</p>
+        <ol>
+            <li>Click any node to select it as the <b>querying node</b> (it will be highlighted in red).</li>
+            <li>Then, do one of the following:
+                <ul>
+                    <li>Click another node to find the <b>K-closest nodes</b> to it.</li>
+                    <li>Use the search box to find the K-closest nodes to an <b>npub/pubkey</b>.</li>
+                </ul>
+            </li>
+        </ol>
+        <p>The lookup path is shown with red lines. The final K-closest nodes are highlighted in blue for npub lookups.</p>
+        <p><i>Click a node to begin...</i></p>
+    </div>
+    <div id="lookup-container" style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 10; display: none; background: white; padding: 10px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: 2px solid red;">
         <input type="text" id="npub-input" placeholder="Paste npub or hex pubkey to find" size="40">
         <button id="lookup-button">Lookup</button>
     </div>
@@ -134,6 +152,7 @@
             // --- DOM Elements ---
             const svg = document.getElementById('dht-svg');
             const loadingDiv = document.getElementById('loading');
+            const instructionsDiv = document.getElementById('instructions');
             const lookupContainer = document.getElementById('lookup-container');
             const npubInput = document.getElementById('npub-input');
             const lookupButton = document.getElementById('lookup-button');
@@ -569,6 +588,7 @@
 
             const handleNodeClick = async (nodeUrl) => {
                 if (!sourceNodeUrl) {
+                    instructionsDiv.style.display = 'none';
                     sourceNodeUrl = nodeUrl;
                     if (highlightCircle) highlightCircle.remove();
                     highlightCircle = document.createElementNS(NS, 'circle');
@@ -637,10 +657,28 @@
                 }
             };
 
+            const resetState = () => {
+                sourceNodeUrl = null;
+                if (highlightCircle) {
+                    highlightCircle.remove();
+                    highlightCircle = null;
+                }
+                lookupContainer.style.display = 'none';
+                instructionsDiv.style.display = 'block';
+                document.querySelectorAll('.path-line').forEach(el => el.remove());
+                document.querySelectorAll('.result-highlight').forEach(el => el.remove());
+            };
+
             lookupButton.addEventListener('click', handleNpubLookup);
             npubInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     handleNpubLookup();
+                }
+            });
+
+            svg.addEventListener('click', (e) => {
+                if (e.target === svg) {
+                    resetState();
                 }
             });
 

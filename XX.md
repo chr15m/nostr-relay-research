@@ -8,38 +8,51 @@ Relay Discovery via Distributed Hash Table
 
 ## Abstract
 
-This NIP defines a distributed hash table (DHT) protocol for Nostr relays to enable decentralized relay discovery. The protocol allows clients to deterministically locate relay lists for any npub without requiring shared relays, solving the relay discovery problem in a decentralized manner.
+This NIP defines a distributed hash table (DHT) protocol for Nostr relays to enable decentralized relay discovery. The protocol allows clients to deterministically locate relay list events for any participating npub without requiring shared relays, making relay discovery more decentralized. The core event type considered is NIP-65 relay lists, but the protocol supports decentralized storage and lookup of arbitrary events and can be extended to e.g. profiles or any other event type at the discretion of clients.
 
 ## Motivation
 
-Currently, clients can only discover relay lists for npubs they encounter through shared relays. If two users do not share any common relays, they cannot discover each other's relay preferences as defined in [NIP-65](65.md). This creates network fragmentation and limits discoverability.
+Currently, clients can only discover relay lists for npubs they encounter through shared relays. If two users do not share any common relays, they cannot discover each other's relay preferences as defined in [NIP-65](65.md). This limits discoverability and reduces decentralization and censorship resistance.
 
-A DHT-based approach provides a deterministic, decentralized method for clients to store and retrieve relay lists for any npub, enabling global discoverability without centralized infrastructure.
+Current methods for disseminating the relay list for an npub include:
+
+- [NIP-01](01.md) where events can contains a relay hint.
+- [NIP-65](65.md) which says clients "SHOULD spread an author's kind:10002 event to as many relays as viable".
+- [NIP-05](05.md) DNS based identifiers using a web lookup to `/.well-known/nostr.json`.
+- [NIP-19](19.md) nprofiles which can bundle the user's relays.
+- [NIP-02](02.md) follow lists where each user can have a recommended relay URL.
+- [NIP-51](51.md)/[NIP-17](17.md) DMs where users can publish relay lists where they receive DMs.
+- [NIP-57](57.md) zaps which include relay hints for receiving zaps.
+
+All of these methods suffer a chicken and egg problem where the client has to connect to a relay where the relay list has already been published to discover the relay list for an npub.
+
+A DHT-based approach provides a deterministic, decentralized method for clients to store and retrieve relay lists for npubs without prior knowledge of any preferred relay, enabling global discoverability without centralized infrastructure.
 
 ## Overview
 
-This protocol adapts the BitTorrent Mainline DHT (BEP-5) for Nostr relays, using WebSocket connections and Nostr-style JSON messages instead of UDP and bencode. Relays act as DHT nodes, maintaining routing tables and responding to lookup queries.
+This Kademlia based protocol is inspired by the BitTorrent Mainline DHT (BEP-5), adapted for Nostr relays using WebSocket connections and Nostr-style JSON messages instead of UDP and bencode. Each relay acts as a DHT node, maintaining a routing table and responding to lookup queries.
 
-The key insight is that relay URLs serve as both node identifiers (when hashed) and storage locations. Events are stored on relays whose hashed URLs are "closest" to the target key in the DHT keyspace.
+Relay URLs serve as both node identifiers (when hashed) and storage buckets via the normal Nostr websocket protocol. Events are stored on relays whose hashed URLs are "closest" to the target ID (hashed npub) key in the DHT keyspace.
 
 ### Key-Value Mapping
 
-- **Keys**: SHA-256 hashes of npubs for which relay information is being stored
-- **Values**: Nostr events (primarily [NIP-65](65.md) relay lists) published to the closest relays
+- **Keys**: SHA-256 hashes of 1. relay (DHT node) URLs 2. npubs for which relay information is being stored.
+- **Values**: Nostr events (primarily [NIP-65](65.md) relay lists) published to the closest relays.
 
 ### Client Workflow
 
-1. **Publishing**: A client hashes its npub, performs a `FIND_NODE` lookup to find relays closest to that hash, then publishes its [NIP-65](65.md) relay list to those relays
-2. **Discovery**: A client hashes a target npub, performs a `FIND_NODE` lookup to find the closest relays, then queries those relays for the target's relay list
+1. **Publishing**: A client hashes its npub, performs a recursive `FIND_RELAY` lookup to find relays closest to that hash, then publishes its [NIP-65](65.md) relay list (or any other event) to those relays.
+2. **Discovery**: A client hashes a target npub, performs a recursive `FIND_RELAY` lookup to find the closest relays, then queries those relays for the target's relay list (or any other event).
 
 ## Protocol Specification
 
 ### Node Identity
 
 Each relay in the DHT is identified by:
-- **URL**: The relay's `wss://` WebSocket URL
-- **Node ID**: SHA-256 hash of the relay's URL
-- **Distance Metric**: XOR distance between Node IDs, interpreted as unsigned integers
+
+- **URL**: The relay's `wss://` WebSocket URL.
+- **Node ID**: SHA-256 hash of the relay's URL.
+- **Distance Metric**: XOR distance between Node IDs, interpreted as unsigned integers.
 
 ```
 NodeID = SHA256(RELAY_URL)
@@ -51,9 +64,10 @@ distance(A, B) = A XOR B
 Each relay maintains a routing table consisting of up to 256 "buckets," each responsible for a specific range of the 256-bit ID space. Each bucket can hold up to **K=8** nodes.
 
 Nodes are classified by status:
-- `good`: Responded to a query recently (within 15 minutes)
-- `questionable`: No activity for 15 minutes  
-- `bad`: Failed to respond to multiple consecutive queries
+
+- `good`: Responded to a query recently (within 2 hours).
+- `questionable`: No response/activity for 2 hours.
+- `bad`: Failed to respond to 5 consecutive queries.
 
 ### DHT Messages
 
@@ -65,7 +79,7 @@ Used to verify node availability and announce presence.
 
 **Request:**
 ```json
-["PING", <transaction_id>, <optional_url>]
+["PING", <transaction_id>, <optional_relay_url>]
 ```
 
 **Response:**
@@ -73,16 +87,18 @@ Used to verify node availability and announce presence.
 ["PONG", <transaction_id>]
 ```
 
-- `transaction_id`: Random string to correlate request and response
-- `optional_url`: Sender's WebSocket URL for routing table updates
+- `transaction_id`: Random string to correlate request and response.
+- `optional_relay_url`: Sender's WebSocket URL for routing table updates.
 
-#### `FIND_NODE` / `NODES`
+Clients can in future use PING/PONG messages additionally to test relay availability and responsiveness.
+
+#### `FIND_RELAY` / `NODES`
 
 Used to discover nodes closer to a target ID.
 
 **Request:**
 ```json
-["FIND_NODE", <subscription_id>, <target_id>]
+["FIND_RELAY", <subscription_id>, <target_id>]
 ```
 
 **Response:**
@@ -90,16 +106,16 @@ Used to discover nodes closer to a target ID.
 ["NODES", <subscription_id>, <nodes_array>]
 ```
 
-- `subscription_id`: String identifying the lookup operation
-- `target_id`: 256-bit target ID as hex string
-- `nodes_array`: Array of WebSocket URLs for the K closest known nodes
+- `subscription_id`: String identifying the lookup operation.
+- `target_id`: 256-bit target ID as hex string.
+- `nodes_array`: Array of WebSocket URLs for the K closest known nodes.
 
 ### Recursive Lookup Algorithm
 
 To find nodes closest to a target ID:
 
 1. **Initialize** shortlist with K closest nodes from local routing table
-2. **Query** up to α=3 closest unqueried nodes concurrently with `FIND_NODE`
+2. **Query** up to α=3 closest unqueried nodes concurrently with `FIND_RELAY`
 3. **Update** shortlist with responses, maintaining K closest nodes
 4. **Iterate** until all K closest nodes have been queried
 5. **Result** is the final list of K closest nodes
@@ -108,31 +124,31 @@ To find nodes closest to a target ID:
 
 #### Adding Nodes
 
-When learning about a new node from an incoming connection, relays MUST verify the node's claimed URL by initiating an outgoing connection and performing a `PING`/`PONG` exchange. This prevents routing table poisoning.
+When learning about a new node from an incoming PING, relays MUST verify the relay URL as valid by initiating an outgoing websocket connection and performing a `PING`/`PONG` exchange. This prevents routing table poisoning. This reverse lookup SHOULD be cached and rate limited to prevent DoS attacks - see below.
 
 #### Bucket Maintenance
 
-- If a bucket is full and the relay's ID falls within the bucket's range, split the bucket
-- Otherwise, ping questionable nodes to make space for new nodes
-- Remove nodes that fail to respond to multiple ping attempts
+- If a bucket is full and the relay's ID falls within the bucket's range, split the bucket.
+- Otherwise, PING questionable nodes to make space for new nodes.
+- Remove nodes that fail to respond to multiple PING attempts.
 
 #### Refreshing
 
-Buckets not updated within 2 hours are considered stale and MUST be refreshed by performing a `FIND_NODE` lookup for a random ID within the bucket's range.
+Buckets not updated within 2 hours are considered stale and MUST be refreshed by performing a `FIND_RELAY` lookup for a random ID within the bucket's range.
 
 ## Client Implementation
 
 ### Publishing Relay Lists
 
-1. Hash the client's npub: `target_id = SHA256(npub)`
-2. Perform recursive `FIND_NODE` lookup for `target_id`
-3. Publish [NIP-65](65.md) relay list event to the K closest relays found
+1. Hash the client's npub: `target_id = SHA256(npub)`.
+2. Perform recursive `FIND_RELAY` lookup for `target_id`.
+3. Publish [NIP-65](65.md) relay list event to the K closest relays found.
 
 ### Discovering Relay Lists
 
-1. Hash the target npub: `target_id = SHA256(npub)`  
-2. Perform recursive `FIND_NODE` lookup for `target_id`
-3. Query the K closest relays with `REQ` for [NIP-65](65.md) events from the target npub
+1. Hash the target npub: `target_id = SHA256(npub)`.
+2. Perform recursive `FIND_RELAY` lookup for `target_id`.
+3. Query the K closest relays with `REQ` for [NIP-65](65.md) events from the target npub.
 
 ## Security Considerations
 
@@ -142,13 +158,13 @@ The connect-back verification requirement prevents malicious nodes from claiming
 
 ### Rate Limiting
 
-Relays SHOULD rate-limit `PING` requests to prevent abuse, for example by ignoring more than one `PING` every 10 seconds per WebSocket connection.
+Relays SHOULD rate-limit `PING` requests to prevent abuse, for example by ignoring more than one `PING` every minute per WebSocket connection.
 
 ### Client Caching
 
 Since the global relay set changes slowly over time, clients MAY cache their DHT routing table state locally. This enables faster lookups without requiring a full bootstrap process on each startup.
 
-Clients SHOULD refresh cached routing tables by performing periodic `FIND_NODE` lookups for random IDs, similar to relay bucket refreshing. Cached routing tables older than 4 hours SHOULD be considered stale and refreshed.
+Clients SHOULD refresh cached routing tables by performing periodic `FIND_RELAY` lookups for random IDs, similar to relay bucket refreshing. Cached routing tables older than 4 hours SHOULD be considered stale and refreshed.
 
 ### Cryptographic Integrity
 
@@ -160,15 +176,19 @@ New relays joining the DHT MUST bootstrap by connecting to known DHT-enabled rel
 
 ## Relationship to Other NIPs
 
-This NIP extends the relay discovery capabilities of [NIP-65](65.md) by providing a decentralized storage and lookup mechanism. While [NIP-65](65.md) defines the relay list event format, this NIP defines where and how to store and retrieve such events in a decentralized manner.
+This NIP extends the relay discovery capabilities of [NIP-65](65.md) by providing a decentralized storage and lookup mechanism. While [NIP-65](65.md) defines the relay list event format, this NIP defines a way to store and retrieve such events in a decentralized manner.
 
 The protocol can also be used to store and discover other event types by using appropriate target IDs, making it a general-purpose decentralized storage layer for Nostr.
 
+## DM "relay skipping" idea
+
+Since target ID hashes can be composed from any source data, the protocol can be adapted for arbitrary uses in future. One example is DM clients that want to decentralize the relays they use. They can compose a target ID including a time-range e.g. `target_id = SHA256(current_hour + npub1 + npub2 + shared_secret)` which would mean the shared relay set is updated and moved every hour. This should add an additional layer of security to the existing DM cryptography.
+
 ## Implementation Notes
 
-- Relays MAY implement only a subset of DHT functionality (e.g., only responding to queries without maintaining routing tables)
-- Clients MAY fall back to traditional relay discovery methods if DHT lookup fails
-- The protocol is designed to be incrementally deployable - benefits increase as more relays implement DHT support
+- Relays MAY implement only a subset of DHT functionality (e.g., only responding to queries without maintaining routing tables).
+- Clients MAY fall back to traditional relay discovery methods if DHT lookup fails.
+- The protocol is designed to be incrementally deployable - benefits increase as more relays implement DHT support.
 
 ## Reference Implementation
 

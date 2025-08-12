@@ -3,6 +3,12 @@ The purpose of this repo is:
 1. To gather stats on existing deployed relays.
 2. To research a [DHT implementation for Nostr relays](./XX.md).
 
+[Try the relay DHT simulation](https://chr15m.github.io/nostr-relay-research/) (check the console too).
+
+### Relay stats
+
+Relay list scraped from 
+
 The largest relay responding to a `COUNT` of NIP-65 events (nostr.band) reports 2.25 million events.
 
 ```

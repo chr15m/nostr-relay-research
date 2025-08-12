@@ -43,8 +43,8 @@ Relay URLs serve as both node identifiers (when hashed) and storage buckets via 
 
 ### Client Workflow
 
-1. **Publishing**: A client hashes its npub, performs a recursive `FIND_RELAY` lookup to find relays closest to that hash, then publishes its [NIP-65](65.md) relay list (or any other event) to those relays.
-2. **Discovery**: A client hashes a target npub, performs a recursive `FIND_RELAY` lookup to find the closest relays, then queries those relays for the target's relay list (or any other event).
+1. **Publishing**: A client hashes its npub, performs a recursive `DHT_FIND_RELAY` lookup to find relays closest to that hash, then publishes its [NIP-65](65.md) relay list (or any other event) to those relays.
+2. **Discovery**: A client hashes a target npub, performs a recursive `DHT_FIND_RELAY` lookup to find the closest relays, then queries those relays for the target's relay list (or any other event).
 
 ## Protocol Specification
 
@@ -79,7 +79,7 @@ All DHT messages are JSON arrays sent over WebSocket connections, following the 
 
 #### `PING` / `PONG`
 
-Used to verify node availability and announce presence.
+Used to verify relay availability and announce presence.
 
 **Request:**
 ```json
@@ -96,40 +96,42 @@ Used to verify node availability and announce presence.
 
 Clients can in future use PING/PONG messages additionally to test relay availability and responsiveness.
 
-#### `FIND_RELAY` / `NODES`
+#### `DHT_FIND_RELAY` / `DHT_RELAYS`
 
 Used to discover nodes closer to a target ID.
 
 **Request:**
 ```json
-["FIND_RELAY", <subscription_id>, <target_id>]
+["DHT_FIND_RELAY", <subscription_id>, <target_id>]
 ```
 
 **Response:**
 ```json
-["NODES", <subscription_id>, <nodes_array>]
+["DHT_RELAYS", <subscription_id>, <relay_urls_array>]
 ```
 
 - `subscription_id`: String identifying the lookup operation.
 - `target_id`: 256-bit target ID as hex string.
-- `nodes_array`: Array of WebSocket URLs for the K closest known nodes.
+- `relay_urls_array`: Array of WebSocket URLs for the K closest known nodes.
 
 ### Recursive Lookup Algorithm
 
 To find nodes closest to a target ID:
 
-1. **Initialize** shortlist with K closest nodes from local routing table
-2. **Query** up to α=3 closest unqueried nodes concurrently with `FIND_RELAY` (each query requires establishing a WebSocket connection to the target relay)
+1. **Initialize** shortlist with K closest nodes from local routing table or bootstrap nodes
+2. **Query** up to α=3 closest unqueried nodes concurrently with `DHT_FIND_RELAY` (opening websocket connections to each)
 3. **Update** shortlist with responses, maintaining K closest nodes
 4. **Close** WebSocket connections after receiving responses (unless maintained for other purposes)
 5. **Iterate** until all K closest nodes have been queried
 6. **Result** is the final list of K closest nodes
 
+Both relays and clients use the same lookup algorithm, connecting over websockets and querying relay nodes progressively.
+
 ### Routing Table Management
 
 #### Adding Nodes
 
-When learning about a new node from an incoming PING, relays MUST verify the relay URL as valid by initiating an outgoing websocket connection and performing a `PING`/`PONG` exchange. This prevents routing table poisoning. This reverse lookup SHOULD be cached and rate limited to prevent DoS attacks - see below.
+When learning about a new node from an incoming PING, relays MUST verify the relay URL as valid before adding it to any routing table, by initiating an outgoing websocket connection and performing a `PING`/`PONG` exchange. This prevents routing table poisoning. This reverse lookup SHOULD be cached and rate limited to prevent DoS attacks - see below.
 
 #### Bucket Maintenance
 
@@ -139,7 +141,7 @@ When learning about a new node from an incoming PING, relays MUST verify the rel
 
 #### Refreshing
 
-Buckets not updated within 4 hours are considered stale and MUST be refreshed by performing a `FIND_RELAY` lookup for a random ID within the bucket's range.
+Buckets not updated within 4 hours are considered stale and MUST be refreshed by performing a `DHT_FIND_RELAY` lookup for a random ID within the bucket's range.
 
 #### Persistence
 
@@ -150,13 +152,13 @@ Routing tables SHOULD be persisted to disk between relay restarts to avoid requi
 ### Publishing Relay Lists
 
 1. Hash the client's npub: `target_id = SHA256(npub)`.
-2. Perform recursive `FIND_RELAY` lookup for `target_id`.
+2. Perform recursive `DHT_FIND_RELAY` lookup for `target_id`.
 3. Publish [NIP-65](65.md) relay list event to the K closest relays found.
 
 ### Discovering Relay Lists
 
 1. Hash the target npub: `target_id = SHA256(npub)`.
-2. Perform recursive `FIND_RELAY` lookup for `target_id`.
+2. Perform recursive `DHT_FIND_RELAY` lookup for `target_id`.
 3. Query the K closest relays with `REQ` for [NIP-65](65.md) events from the target npub.
 
 ## Security Considerations
@@ -173,7 +175,7 @@ Relays SHOULD rate-limit `PING` requests to prevent abuse, for example by ignori
 
 Since the global relay set changes slowly over time, clients MAY cache their DHT routing table state locally. This enables faster lookups without requiring a full bootstrap process on each startup.
 
-Clients SHOULD refresh cached routing tables by performing periodic `FIND_RELAY` lookups for random IDs, similar to relay bucket refreshing. Cached routing tables older than 4 hours SHOULD be considered stale and refreshed.
+Clients SHOULD refresh cached routing tables by performing periodic `DHT_FIND_RELAY` lookups for random IDs, similar to relay bucket refreshing. Cached routing tables older than 4 hours SHOULD be considered stale and refreshed.
 
 **Connection Management for Clients**: When performing DHT lookups, clients MUST establish WebSocket connections to each relay they query. These connections SHOULD be closed after receiving responses unless the client intends to maintain the connection for regular Nostr operations.
 
@@ -261,9 +263,9 @@ To add a node, first determine the correct bucket using the node ID calculation 
 
 When a bucket is full, the relay attempts to make space. If the relay's own ID falls within the bucket's range, the bucket is split into two, and its nodes (including the new one) are redistributed. Otherwise, the relay identifies any `questionable` nodes in the bucket and pings the one that was least recently seen. If the pinged node responds, it is marked as `good`. If it fails, its failure count is incremented. If a node's failure count reaches the maximum (e.g., 5), it is removed, making space for the new node. If all nodes in the bucket are `good`, the new node is not added.
 
-#### 4. Recursive FIND_RELAY Lookup
+#### 4. Recursive DHT_FIND_RELAY Lookup
 
-The lookup process is iterative. It begins with a "shortlist" initialized with the K closest nodes from the local routing table (or bootstrap nodes if the table is empty). In each round, the client concurrently sends `FIND_RELAY` queries to the α (e.g., 3) closest unqueried nodes from the shortlist. As `NODES` responses arrive, the new nodes are added to the shortlist, which is always kept sorted by distance to the target and trimmed to size K. The process terminates when a round of queries completes without discovering any nodes closer than those already known. The result is the final list of K closest nodes.
+The lookup process is iterative. It begins with a "shortlist" initialized with the K closest nodes from the local routing table (or bootstrap nodes if the table is empty). In each round, the client concurrently sends `DHT_FIND_RELAY` queries to the α (e.g., 3) closest unqueried nodes from the shortlist. As `DHT_RELAYS` responses arrive, the new nodes are added to the shortlist, which is always kept sorted by distance to the target and trimmed to size K. The process terminates when a round of queries completes without discovering any nodes closer than those already known. The result is the final list of K closest nodes.
 
 ### Message Handling
 
@@ -271,45 +273,45 @@ The lookup process is iterative. It begins with a "shortlist" initialized with t
 
 When a `PING` message is received, the relay first checks if the request complies with rate limits. If it does, the relay immediately sends a `PONG` response with the same transaction ID. If the `PING` included the sender's URL, the relay validates the URL format, checks if it is unseen in the routing table, and then initiates the connect-back verification process to confirm the sender's authenticity before attempting to add it to the routing table.
 
-#### FIND_RELAY Handler
+#### DHT_FIND_RELAY Handler
 
-Upon receiving a `FIND_RELAY` request, the relay searches its routing table for the K nodes closest to the provided `targetId`. It then sends a single `NODES` message back to the requester, containing the subscription ID from the request and an array of the WebSocket URLs of the K closest nodes found.
+Upon receiving a `DHT_FIND_RELAY` request, the relay searches its routing table for the K nodes closest to the provided `targetId`. It then sends a single `DHT_RELAYS` message back to the requester, containing the subscription ID from the request and an array of the WebSocket URLs of the K closest nodes found.
 
 ### Periodic Maintenance Tasks
 
-#### 1. Bucket Refresh (Every 4 hours)
+#### 1. Bucket Refresh (Every 2 hours)
 
-Every 4 hours the relay checks each bucket in its routing table. If a bucket has not been modified in over 4 hours, it is considered stale. To refresh it, the relay generates a random ID within that bucket's range and initiates a `FIND_RELAY` lookup for that ID. This process helps discover new nodes and validate existing ones within that segment of the keyspace.
+Every 2 hours the relay checks each bucket in its routing table. If a bucket has not been modified in over 4 hours, it is considered stale. To refresh it, the relay generates a random ID within that bucket's range and initiates a `DHT_FIND_RELAY` lookup for that ID. This process helps discover new nodes and validate existing ones within that segment of the keyspace.
 
 #### 2. Node Health Check (Every 1 hour)
 
 Every hour, the relay iterates through all nodes in its routing table. Any `good` node that has not been seen in 2 hours is demoted to `questionable`. Any `questionable` node that has not been pinged in the last 30 minutes is sent a `PING` to check its status.
 
-#### 3. Routing Table Cleanup (Every hour)
+#### 3. Routing Table Cleanup (Every 1 hour)
 
-On an hourly basis, the relay cleans its routing table by removing any node that has accumulated 5 or more consecutive failures. These nodes are considered `bad` and are evicted to make room for new, responsive nodes.
+Every hour, the relay cleans its routing table by removing any node that has accumulated 5 or more consecutive failures. These nodes are considered `bad` and are evicted to make room for new, responsive nodes.
 
 ### Required Message Types to Handle
 
 1. **PING** - Respond with PONG, optionally learn about sender
-2. **FIND_RELAY** - Return K closest known nodes to target ID
+2. **DHT_FIND_RELAY** - Return K closest known nodes to target ID
 
 ### Required Outgoing Operations
 
 1. **Connect-back verification** - When learning new nodes from PING
 2. **Periodic PING** - To maintain node health status
-3. **FIND_RELAY queries** - For bucket refresh and client lookups
+3. **DHT_FIND_RELAY queries** - For bucket refresh and client lookups
 
 ### Bootstrap Process
 
-When a new relay starts, it must bootstrap to join the DHT. If no persisted routing table exists, it connects to a list of known, stable, DHT-enabled relays. For each bootstrap relay, it establishes a WebSocket connection, sends a `PING` (including its own URL) to announce its presence, and then performs a `FIND_RELAY` lookup for its own ID to begin populating its routing table with nearby nodes. Connections to bootstrap relays are closed after the initial exchange unless maintained for other purposes.
+When a new relay starts, it must bootstrap to join the DHT. If no persisted routing table exists, it connects to a list of known, stable, DHT-enabled relays. For each bootstrap relay, it establishes a WebSocket connection, sends a `PING` (including its own URL) to announce its presence, and then performs a `DHT_FIND_RELAY` lookup for its own ID to begin populating its routing table with nearby nodes. Connections to bootstrap relays are closed after the initial exchange unless maintained for other purposes.
 
 ### Configuration Parameters
 
 - **K** = 8 (max nodes per bucket)
 - **α** = 3 (concurrency parameter for lookups)
-- **Bucket refresh interval** = 4 hours
-- **Node health check interval** = 1 hour
+- **Bucket refresh interval** = 2 hours
+- **Node health check & clean interval** = 1 hour
 - **Ping timeout** = 30 seconds
 - **Max consecutive failures** = 5
 - **Rate limit** = 1 ping per minute per connection

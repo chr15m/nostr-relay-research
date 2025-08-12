@@ -180,7 +180,7 @@ This NIP extends the relay discovery capabilities of [NIP-65](65.md) by providin
 
 The protocol can also be used to store and discover other event types by using appropriate target IDs, making it a general-purpose decentralized storage layer for Nostr.
 
-## Potential future uses
+## Potential future use cases
 
 Since target ID hashes can be composed from any source data, the DHT protocol can be adapted for arbitrary uses in future.
 
@@ -215,7 +215,7 @@ The routing table is stored as a JSON array of buckets:
           "consecutiveFailures": 0
         },
         {
-          "url": "wss://relay2.example.com",
+          "url": "wss://relay2.example.com", 
           "status": "questionable",
           "lastSeen": "2023-10-27T07:45:00Z",
           "lastPinged": "2023-10-27T09:45:00Z",
@@ -226,19 +226,57 @@ The routing table is stored as a JSON array of buckets:
     }
   ],
   "ownUrl": "wss://my-relay.example.com",
+  "ownId": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456"
 }
 ```
 
 #### Node Status Values
 
 - `good`: Responded within last 2 hours
-- `questionable`: No response for 2+ hours but < 5 consecutive failures
+- `questionable`: No response for 2+ hours but < 5 consecutive failures  
 - `bad`: 5+ consecutive ping failures (should be removed)
 
 ### Core Algorithms
 
-TBD...
+#### 1. Node ID Calculation
 
+A node's ID is calculated by taking the lowercase SHA-256 hash of its WebSocket URL. The distance between two IDs is their XOR distance, calculated by interpreting the hex IDs as large integers. The bucket index for a given node is determined by the length of the common prefix between the local node's ID and the other node's ID, which is equivalent to `256 - (bit length of the XOR distance)`. A node does not store itself.
+
+#### 2. Adding a Node to Routing Table
+
+To add a node, first determine the correct bucket using the node ID calculation logic. If the node already exists in the bucket, its status is updated to `good`, its consecutive failure count is reset, and its `lastSeen` timestamp is updated. If the node does not exist and the bucket has fewer than K nodes, the new node is added with a `good` status. If the bucket is full, the logic for handling a full bucket is invoked.
+
+#### 3. Handling Full Buckets
+
+When a bucket is full, the relay attempts to make space. If the relay's own ID falls within the bucket's range, the bucket is split into two, and its nodes (including the new one) are redistributed. Otherwise, the relay identifies any `questionable` nodes in the bucket and pings the one that was least recently seen. If the pinged node responds, it is marked as `good`. If it fails, its failure count is incremented. If a node's failure count reaches the maximum (e.g., 5), it is removed, making space for the new node. If all nodes in the bucket are `good`, the new node is not added.
+
+#### 4. Recursive FIND_RELAY Lookup
+
+The lookup process is iterative. It begins with a "shortlist" initialized with the K closest nodes from the local routing table (or bootstrap nodes if the table is empty). In each round, the client concurrently sends `FIND_RELAY` queries to the α (e.g., 3) closest unqueried nodes from the shortlist. As `NODES` responses arrive, the new nodes are added to the shortlist, which is always kept sorted by distance to the target and trimmed to size K. The process terminates when a round of queries completes without discovering any nodes closer than those already known. The result is the final list of K closest nodes.
+
+### Message Handling
+
+#### PING Handler
+
+When a `PING` message is received, the relay first checks if the request complies with rate limits. If it does, the relay immediately sends a `PONG` response with the same transaction ID. If the `PING` included the sender's URL, the relay validates the URL format, checks if it is unseen in the routing table, and then initiates the connect-back verification process to confirm the sender's authenticity before attempting to add it to the routing table.
+
+#### FIND_RELAY Handler
+
+Upon receiving a `FIND_RELAY` request, the relay searches its routing table for the K nodes closest to the provided `targetId`. It then sends a single `NODES` message back to the requester, containing the subscription ID from the request and an array of the WebSocket URLs of the K closest nodes found.
+
+### Periodic Maintenance Tasks
+
+#### 1. Bucket Refresh (Every 4 hours)
+
+Every 4 hours the relay checks each bucket in its routing table. If a bucket has not been modified in over 8 hours, it is considered stale. To refresh it, the relay generates a random ID within that bucket's range and initiates a `FIND_RELAY` lookup for that ID. This process helps discover new nodes and validate existing ones within that segment of the keyspace.
+
+#### 2. Node Health Check (Every 1 hour)
+
+Every hour, the relay iterates through all nodes in its routing table. Any `good` node that has not been seen in 2 hours is demoted to `questionable`. Any `questionable` node that has not been pinged in the last 30 minutes is sent a `PING` to check its status.
+
+#### 3. Routing Table Cleanup (Every hour)
+
+On an hourly basis, the relay cleans its routing table by removing any node that has accumulated 5 or more consecutive failures. These nodes are considered `bad` and are evicted to make room for new, responsive nodes.
 
 ### Required Message Types to Handle
 
@@ -251,20 +289,23 @@ TBD...
 2. **Periodic PING** - To maintain node health status
 3. **FIND_RELAY queries** - For bucket refresh and client lookups
 
+### Bootstrap Process
+
+When a new relay starts, it must bootstrap to join the DHT. It connects to a list of known, stable, DHT-enabled relays. For each bootstrap relay, it sends a `PING` (including its own URL) to announce its presence and then performs a `FIND_RELAY` lookup for its own ID to begin populating its routing table with nearby nodes.
+
 ### Configuration Parameters
 
 - **K** = 8 (max nodes per bucket)
 - **α** = 3 (concurrency parameter for lookups)
-- **Bucket refresh interval** = 2 hours
-- **Node health check interval** = 15 minutes
+- **Bucket refresh interval** = 4 hours
+- **Node health check interval** = 1 hour
 - **Ping timeout** = 30 seconds
 - **Max consecutive failures** = 5
 - **Rate limit** = 1 ping per minute per connection
 
 ## Implementation Notes
 
-- Relays MAY implement only a subset of DHT functionality (e.g., only responding to queries without maintaining routing tables).
-- Clients MAY fall back to traditional relay discovery methods if DHT lookup fails.
+- Clients SHOULD fall back to traditional relay discovery methods if DHT lookup fails.
 - The protocol is designed to be incrementally deployable - benefits increase as more relays implement DHT support.
 
 ## Reference Implementation

@@ -188,6 +188,79 @@ One example is DM clients that want to decentralize and mix up the relays they u
 
 Another example is specific NIP-78 applications which could skip setting default relays, or absolve users of choosing relays, by using a target ID like `target_id = SHA256(application_name + npub)` and writing user data to the resulting set of relays. This would create deterministic npub distribution across relays that is specific to that application and user.
 
+## Implementation
+
+This section provides complete implementation guidance for relay developers.
+
+### Data Structures
+
+#### Routing Table Structure
+
+The routing table is stored as a JSON array of buckets:
+
+```json
+{
+  "buckets": [
+    {
+      "range": {
+        "min": "0000000000000000000000000000000000000000000000000000000000000000",
+        "max": "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "nodes": [
+        {
+          "url": "wss://relay1.example.com",
+          "status": "good",
+          "lastSeen": "2023-10-27T10:00:00Z",
+          "lastPinged": "2023-10-27T09:30:00Z",
+          "consecutiveFailures": 0
+        },
+        {
+          "url": "wss://relay2.example.com",
+          "status": "questionable",
+          "lastSeen": "2023-10-27T07:45:00Z",
+          "lastPinged": "2023-10-27T09:45:00Z",
+          "consecutiveFailures": 1
+        }
+      ],
+      "lastChanged": "2023-10-27T10:00:00Z"
+    }
+  ],
+  "ownUrl": "wss://my-relay.example.com",
+}
+```
+
+#### Node Status Values
+
+- `good`: Responded within last 2 hours
+- `questionable`: No response for 2+ hours but < 5 consecutive failures
+- `bad`: 5+ consecutive ping failures (should be removed)
+
+### Core Algorithms
+
+TBD...
+
+
+### Required Message Types to Handle
+
+1. **PING** - Respond with PONG, optionally learn about sender
+2. **FIND_RELAY** - Return K closest known nodes to target ID
+
+### Required Outgoing Operations
+
+1. **Connect-back verification** - When learning new nodes from PING
+2. **Periodic PING** - To maintain node health status
+3. **FIND_RELAY queries** - For bucket refresh and client lookups
+
+### Configuration Parameters
+
+- **K** = 8 (max nodes per bucket)
+- **α** = 3 (concurrency parameter for lookups)
+- **Bucket refresh interval** = 2 hours
+- **Node health check interval** = 15 minutes
+- **Ping timeout** = 30 seconds
+- **Max consecutive failures** = 5
+- **Rate limit** = 1 ping per minute per connection
+
 ## Implementation Notes
 
 - Relays MAY implement only a subset of DHT functionality (e.g., only responding to queries without maintaining routing tables).

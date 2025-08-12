@@ -38,7 +38,7 @@ Relay URLs serve as both node identifiers (when hashed) and storage buckets via 
 
 ### Key-Value Mapping
 
-- **Keys**: SHA-256 hashes of 1. relay (DHT node) URLs 2. npubs for which relay information is being stored.
+- **Keys**: 32-byte lowercase hex-encoded SHA-256 hashes of 1. relay (DHT node) URLs 2. npubs for which relay information is being stored.
 - **Values**: Nostr events (primarily [NIP-65](65.md) relay lists) published to the closest relays.
 
 ### Client Workflow
@@ -53,11 +53,11 @@ Relay URLs serve as both node identifiers (when hashed) and storage buckets via 
 Each relay in the DHT is identified by:
 
 - **URL**: The relay's `wss://` WebSocket URL.
-- **Node ID**: SHA-256 hash of the relay's complete URL including protocol.
+- **Node ID**: 32-byte lowercase hex-encoded SHA-256 hash of the relay's complete URL including protocol.
 - **Distance Metric**: XOR distance between Node IDs, interpreted as unsigned integers.
 
 ```
-NodeID = SHA256(RELAY_URL)  // e.g. SHA256("wss://relay.example.com")
+NodeID = SHA256(RELAY_URL)  // e.g. 32-byte lowercase hex-encoded SHA-256("wss://relay.example.com")
 distance(A, B) = A XOR B
 ```
 
@@ -65,7 +65,7 @@ distance(A, B) = A XOR B
 
 Each relay maintains a routing table consisting of up to 256 "buckets," each responsible for a specific range of the 256-bit ID space. Each bucket can hold up to **K=8** nodes.
 
-The bucket index for a given node is determined by the position of the most significant bit in the XOR distance between the local node's ID and the other node's ID. This is equivalent to the number of leading zero bits in the XOR distance.
+The bucket index for a given node is determined by the formula: `bucket_index = 256 - bit_length(XOR_distance)`, where `bit_length` is the number of bits required to represent the XOR distance. This is equivalent to the number of leading zero bits in the XOR distance plus one.
 
 Nodes are classified by status:
 
@@ -93,10 +93,10 @@ Used to verify relay availability and announce presence.
 ["PONG", <transaction_id>]
 ```
 
-- `transaction_id`: Random string to correlate request and response.
-- `optional_relay_url`: Sender's WebSocket URL for routing table updates.
+- `transaction_id`: `<string>` - Random string to correlate request and response.
+- `optional_relay_url`: `<string>` - Sender's WebSocket URL for routing table updates.
 
-Clients can in future use PING/PONG messages additionally to test relay availability and responsiveness.
+Non-relay clients MAY also use PING/PONG messages to test relay availability and responsiveness.
 
 #### `DHT_FIND_RELAY` / `DHT_RELAYS`
 
@@ -112,16 +112,16 @@ Used to discover nodes closer to a target ID.
 ["DHT_RELAYS", <subscription_id>, <relay_urls_array>]
 ```
 
-- `subscription_id`: String identifying the lookup operation.
-- `target_id`: 256-bit target ID as hex string.
-- `relay_urls_array`: Array of WebSocket URLs for the K closest known nodes.
+- `subscription_id`: `<string>` - String identifying the lookup operation.
+- `target_id`: `<32-byte lowercase hex-encoded SHA-256>` - Target ID for lookup.
+- `relay_urls_array`: `<array of strings>` - Array of WebSocket URLs for the K closest known nodes.
 
 ### Recursive Lookup Algorithm
 
 To find nodes closest to a target ID:
 
 1. **Initialize** shortlist with K closest nodes from local routing table or bootstrap nodes
-2. **Query** up to α=3 closest unqueried nodes concurrently with `DHT_FIND_RELAY` (opening websocket connections to each)
+2. **Query** up to α=3 (query concurrency) closest unqueried nodes concurrently with `DHT_FIND_RELAY` (opening websocket connections to each)
 3. **Update** shortlist with responses, maintaining K closest nodes
 4. **Close** WebSocket connections after receiving responses (unless maintained for other purposes)
 5. **Iterate** until all K closest nodes have been queried
@@ -133,7 +133,7 @@ Both relays and clients use the same lookup algorithm, connecting over websocket
 
 #### Adding Nodes
 
-When learning about a new node from an incoming PING, relays MUST verify the relay URL as valid before adding it to any routing table, by initiating an outgoing websocket connection and performing a `PING`/`PONG` exchange. This prevents routing table poisoning. If the verification fails (connection timeout, invalid response, or connection refused), the node MUST NOT be added to the routing table. This reverse lookup SHOULD be cached and rate limited to prevent DoS attacks.
+When learning about a new node from an incoming PING, relays MUST verify the relay URL as valid before adding it to any routing table, by initiating an outgoing websocket connection and performing a `PING`/`PONG` exchange. This prevents routing table poisoning. If the verification fails (30 second connection timeout, invalid response, or connection refused), the node MUST NOT be added to the routing table. This reverse lookup SHOULD be cached and rate limited to prevent DoS attacks.
 
 #### Bucket Maintenance
 
@@ -154,13 +154,13 @@ Routing tables SHOULD be persisted to disk between relay restarts to avoid requi
 
 ### Publishing Relay Lists
 
-1. Hash the client's npub: `target_id = SHA256(npub)`.
+1. Hash the client's npub: `target_id = SHA-256(npub)`.
 2. Perform recursive `DHT_FIND_RELAY` lookup for `target_id`.
 3. Publish [NIP-65](65.md) relay list event to the K closest relays found.
 
 ### Discovering Relay Lists
 
-1. Hash the target npub: `target_id = SHA256(npub)`.
+1. Hash the target npub: `target_id = SHA-256(npub)`.
 2. Perform recursive `DHT_FIND_RELAY` lookup for `target_id`.
 3. Query the K closest relays with `REQ` for [NIP-65](65.md) events from the target npub.
 
@@ -184,7 +184,7 @@ Clients SHOULD refresh cached routing tables by performing periodic `DHT_FIND_RE
 
 #### Cryptographic Integrity
 
-Unlike BitTorrent DHT, this protocol benefits from Nostr's cryptographic signatures. All stored events are signed by their authors, preventing malicious nodes from forging relay list data. This eliminates the need for additional integrity mechanisms required in BitTorrent DHT.
+Unlike BitTorrent DHT, this protocol benefits from Nostr's cryptographic signatures. All stored events are signed by their authors, preventing malicious nodes from forging relay list data. This eliminates the need for additional integrity mechanisms required by the BitTorrent DHT such as announce tokens.
 
 #### Eclipse Attacks
 
@@ -200,14 +200,15 @@ This protocol includes several defenses against eclipse attacks:
 - **Bucket splitting constraints**: Only allows splitting when the node's own ID falls within the bucket range
 - **Multiple lookup paths**: Uses α=3 concurrent queries rather than single-path lookups
 - **Rate limiting**: Limits PING requests to prevent rapid routing table manipulation
+- **Cryptography**: Signed events prevent an attacker generating fake values
 
-The remaining risks are due to the relatively small size of the Nostr relay network (~1000 nodes vs millions in BitTorrent DHT) which make eclipse attacks more feasible:
+The remaining risks are due to the relatively small size of the Nostr relay network (~1000 nodes vs millions in the BitTorrent DHT) which make eclipse attacks more feasible:
 
 - **Lower attack cost**: Fewer malicious relays needed to surround targets
 - **Limited routing diversity**: Fewer honest nodes provide less diverse routing paths
 - **No node ID restrictions**: Attackers can freely generate URLs to position their node IDs strategically
 
-The primary mitigation against this attack is the fact that clients already have other sources for valid NIP-65 relay lists. Clients can cryptographically verify NIP-65 lists and obtain those lists from other sources, which allows them to route around any malicious DHT attack and rendering such an attack fairly pointless.
+The primary mitigation against this attack is the fact that clients already have other sources for valid NIP-65 relay lists. Clients can cryptographically verify NIP-65 lists and obtain those lists from other sources, which allows them to route around any malicious DHT attack and renders such an attack fairly pointless.
 
 ## Bootstrap Process
 
@@ -225,9 +226,9 @@ The protocol can also be used to store and discover other event types by using a
 
 Since target ID hashes can be composed from any source data, the DHT protocol can be adapted for arbitrary uses in future.
 
-One example is DM clients that want to decentralize and mix up the relays they use. They can compose a target ID including a time-range e.g. `target_id = SHA256(current_unix_hour + npub1 + npub2 + shared_secret)` which would mean the shared relay set is updated and moved every hour. This could add an additional layer of security to the existing DM cryptography.
+One example is DM clients that want to decentralize and mix up the relays they use. They MAY compose a target ID including a time-range e.g. `target_id = SHA-256(current_unix_hour + npub1 + npub2 + shared_secret)` which would mean the shared relay set is updated and moved every hour. This could add an additional layer of security to the existing DM cryptography.
 
-Another example is specific NIP-78 applications which could skip setting default relays, or absolve users of choosing relays, by using a target ID like `target_id = SHA256(application_name + npub)` and writing user data to the resulting set of relays. This would create deterministic npub distribution across relays that is specific to that application and user.
+Another example is specific NIP-78 applications which MAY skip setting default relays, or absolve users of choosing relays, by using a target ID like `target_id = SHA-256(application_name + npub)` and writing user data to the resulting set of relays. This would create deterministic npub distribution across relays that is specific to that application and user.
 
 ## Implementation
 
@@ -293,7 +294,7 @@ When a bucket is full, the relay attempts to make space. If the relay's own ID f
 
 #### 4. Recursive DHT_FIND_RELAY Lookup
 
-The lookup process is iterative. It begins with a "shortlist" initialized with the K closest nodes from the local routing table (or bootstrap nodes if the table is empty). In each round, the client concurrently sends `DHT_FIND_RELAY` queries to the α (e.g., 3) closest unqueried nodes from the shortlist. As `DHT_RELAYS` responses arrive, the new nodes are added to the shortlist, which is always kept sorted by distance to the target and trimmed to size K. The process terminates when a round of queries completes without discovering any nodes closer than those already known. The result is the final list of K closest nodes.
+The lookup process is iterative. It begins with a "shortlist" initialized with the K closest nodes from the local routing table (or bootstrap nodes if the table is empty). In each round, the client concurrently sends `DHT_FIND_RELAY` queries to the α=3 closest unqueried nodes from the shortlist. As `DHT_RELAYS` responses arrive, the new nodes are added to the shortlist, which is always kept sorted by distance to the target and trimmed to size K. The process terminates when a round of queries completes without discovering any nodes closer than those already known. The result is the final list of K closest nodes.
 
 ### Message Handling
 

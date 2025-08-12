@@ -164,17 +164,17 @@ Routing tables SHOULD be persisted to disk between relay restarts to avoid requi
 2. Perform recursive `DHT_FIND_RELAY` lookup for `target_id`.
 3. Query the K closest relays with `REQ` for [NIP-65](65.md) events from the target npub.
 
-## Security Considerations
+## Security
 
-### Routing Table Poisoning Prevention
+#### Routing Table Poisoning Prevention
 
 The connect-back verification requirement prevents malicious nodes from claiming to operate relays they do not control. Relays SHOULD maintain a short-term cache of recently failed verification attempts to prevent denial-of-service attacks.
 
-### Rate Limiting
+#### Rate Limiting
 
 Relays SHOULD rate-limit `PING` requests to prevent abuse, for example by ignoring more than one `PING` every minute per WebSocket connection.
 
-### Client Caching
+#### Client Caching
 
 Since the global relay set changes slowly over time, clients MAY cache their DHT routing table state locally. This enables faster lookups without requiring a full bootstrap process on each startup.
 
@@ -182,9 +182,32 @@ Clients SHOULD refresh cached routing tables by performing periodic `DHT_FIND_RE
 
 **Connection Management for Clients**: When performing DHT lookups, clients MUST establish WebSocket connections to each relay they query. These connections SHOULD be closed after receiving responses unless the client intends to maintain the connection for regular Nostr operations.
 
-### Cryptographic Integrity
+#### Cryptographic Integrity
 
 Unlike BitTorrent DHT, this protocol benefits from Nostr's cryptographic signatures. All stored events are signed by their authors, preventing malicious nodes from forging relay list data. This eliminates the need for additional integrity mechanisms required in BitTorrent DHT.
+
+#### Eclipse Attacks
+
+An eclipse attack occurs when a malicious actor surrounds a target node with nodes they control, effectively isolating the target from the honest network. In the context of this DHT, an attacker could:
+
+1. **Generate strategic relay URLs**: Create many relay URLs (e.g., `wss://attack1.evil.com`, `wss://attack2.evil.com`) and hash them until finding ones positioned around a target node ID in the keyspace
+2. **Fill routing table buckets**: With K=8 nodes per bucket, an attacker needs only 8 malicious relays to fill each bucket around a target
+3. **Control lookup results**: Direct DHT queries to attacker-controlled relays instead of honest nodes, potentially censoring relay lists or providing false data
+
+This protocol includes several defenses against eclipse attacks:
+
+- **Connect-back verification**: Prevents attackers from claiming relay URLs they don't control
+- **Bucket splitting constraints**: Only allows splitting when the node's own ID falls within the bucket range
+- **Multiple lookup paths**: Uses α=3 concurrent queries rather than single-path lookups
+- **Rate limiting**: Limits PING requests to prevent rapid routing table manipulation
+
+The remaining risks are due to the relatively small size of the Nostr relay network (~1000 nodes vs millions in BitTorrent DHT) which make eclipse attacks more feasible:
+
+- **Lower attack cost**: Fewer malicious relays needed to surround targets
+- **Limited routing diversity**: Fewer honest nodes provide less diverse routing paths
+- **No node ID restrictions**: Attackers can freely generate URLs to position their node IDs strategically
+
+The primary mitigation against this attack is the fact that clients already have other sources for valid NIP-65 relay lists. Clients can cryptographically verify NIP-65 lists and obtain those lists from other sources, which allows them to route around any malicious DHT attack and rendering such an attack fairly pointless.
 
 ## Bootstrap Process
 

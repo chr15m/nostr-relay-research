@@ -53,17 +53,19 @@ Relay URLs serve as both node identifiers (when hashed) and storage buckets via 
 Each relay in the DHT is identified by:
 
 - **URL**: The relay's `wss://` WebSocket URL.
-- **Node ID**: SHA-256 hash of the relay's URL.
+- **Node ID**: SHA-256 hash of the relay's complete URL including protocol.
 - **Distance Metric**: XOR distance between Node IDs, interpreted as unsigned integers.
 
 ```
-NodeID = SHA256(RELAY_URL)
+NodeID = SHA256(RELAY_URL)  // e.g. SHA256("wss://relay.example.com")
 distance(A, B) = A XOR B
 ```
 
 ### Routing Table
 
 Each relay maintains a routing table consisting of up to 256 "buckets," each responsible for a specific range of the 256-bit ID space. Each bucket can hold up to **K=8** nodes.
+
+The bucket index for a given node is determined by the position of the most significant bit in the XOR distance between the local node's ID and the other node's ID. This is equivalent to the number of leading zero bits in the XOR distance.
 
 Nodes are classified by status:
 
@@ -131,7 +133,7 @@ Both relays and clients use the same lookup algorithm, connecting over websocket
 
 #### Adding Nodes
 
-When learning about a new node from an incoming PING, relays MUST verify the relay URL as valid before adding it to any routing table, by initiating an outgoing websocket connection and performing a `PING`/`PONG` exchange. This prevents routing table poisoning. This reverse lookup SHOULD be cached and rate limited to prevent DoS attacks - see below.
+When learning about a new node from an incoming PING, relays MUST verify the relay URL as valid before adding it to any routing table, by initiating an outgoing websocket connection and performing a `PING`/`PONG` exchange. This prevents routing table poisoning. If the verification fails (connection timeout, invalid response, or connection refused), the node MUST NOT be added to the routing table. This reverse lookup SHOULD be cached and rate limited to prevent DoS attacks.
 
 #### Bucket Maintenance
 
@@ -186,6 +188,8 @@ Unlike BitTorrent DHT, this protocol benefits from Nostr's cryptographic signatu
 ## Bootstrap Process
 
 New relays joining the DHT MUST bootstrap by connecting to known DHT-enabled relays. Initial bootstrap nodes SHOULD include [replace with initial set of implementing relays].
+
+Relays SHOULD advertise their DHT support capability via [NIP-11](11.md) relay information document by including this NIP in `supported_nips` in their relay metadata.
 
 ## Relationship to Other NIPs
 

@@ -107,26 +107,9 @@ if [ -f "$nip65_counts_file" ]; then
 
     echo
     echo "Distribution of NIP-65 counts:"
-    jq -r '.[] | .count | select(. != null)' "$nip65_counts_file" | \
-    awk '
-    {
-        if ($1 == 0) c_0++;
-        else if ($1 == 1) c_1++;
-        else if ($1 >= 2 && $1 <= 10) c_2_10++;
-        else if ($1 >= 11 && $1 <= 100) c_11_100++;
-        else if ($1 >= 101 && $1 <= 1000) c_101_1000++;
-        else if ($1 >= 1001 && $1 <= 10000) c_1001_10000++;
-        else if ($1 > 10000) c_10000_plus++;
-    }
-    END {
-        if (c_0 > 0) printf "%7d relays with 0 events\n", c_0;
-        if (c_1 > 0) printf "%7d relays with 1 event\n", c_1;
-        if (c_2_10 > 0) printf "%7d relays with 2-10 events\n", c_2_10;
-        if (c_11_100 > 0) printf "%7d relays with 11-100 events\n", c_11_100;
-        if (c_101_1000 > 0) printf "%7d relays with 101-1000 events\n", c_101_1000;
-        if (c_1001_10000 > 0) printf "%7d relays with 1001-10,000 events\n", c_1001_10000;
-        if (c_10000_plus > 0) printf "%7d relays with >10,000 events\n", c_10000_plus;
-    }' | sort -k1 -nr
+    jq -r 'to_entries[] | select(.value.count != null) | "\(.value.count)\t\(.key)"' "$nip65_counts_file" | \
+    sort -nr | \
+    awk -F'\t' '{printf "%10d %s\n", $1, $2}'
 else
     echo "NIP-65 count data not found. Run ./get-nip65-counts.sh to generate it."
 fi

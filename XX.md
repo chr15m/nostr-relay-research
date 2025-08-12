@@ -180,9 +180,13 @@ This NIP extends the relay discovery capabilities of [NIP-65](65.md) by providin
 
 The protocol can also be used to store and discover other event types by using appropriate target IDs, making it a general-purpose decentralized storage layer for Nostr.
 
-## DM "relay skipping" idea
+## Potential future uses
 
-Since target ID hashes can be composed from any source data, the protocol can be adapted for arbitrary uses in future. One example is DM clients that want to decentralize the relays they use. They can compose a target ID including a time-range e.g. `target_id = SHA256(current_hour + npub1 + npub2 + shared_secret)` which would mean the shared relay set is updated and moved every hour. This should add an additional layer of security to the existing DM cryptography.
+Since target ID hashes can be composed from any source data, the DHT protocol can be adapted for arbitrary uses in future.
+
+One example is DM clients that want to decentralize and mix up the relays they use. They can compose a target ID including a time-range e.g. `target_id = SHA256(current_unix_hour + npub1 + npub2 + shared_secret)` which would mean the shared relay set is updated and moved every hour. This could add an additional layer of security to the existing DM cryptography.
+
+Another example is specific NIP-78 applications which could skip setting default relays, or absolve users of choosing relays, by using a target ID like `target_id = SHA256(application_name + npub)` and writing user data to the resulting set of relays. This would create deterministic npub distribution across relays that is specific to that application and user.
 
 ## Implementation Notes
 
